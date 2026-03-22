@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import Home from '@/containers/Home';
 import Simulation from '@/containers/Simulation';
@@ -11,8 +11,9 @@ const App: React.FC = () => {
       <div className="app">
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/simulation" element={<Simulation />} />
+          <Route path="/protocol/tcp" element={<Simulation />} />
           <Route path="/protocol/:id" element={<ProtocolDetail />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
     </ErrorBoundary>

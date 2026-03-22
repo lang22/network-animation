@@ -1,6 +1,8 @@
 import React from 'react';
 import styled, { keyframes, css } from 'styled-components';
 import { darkTheme } from '@/styles/theme';
+import { DEFAULT_NETWORK_CONFIG, CANVAS_LAYOUT, calculateBoundaryLines } from '@/utils/constants';
+import { TcpConnectionState } from '@/types/networkTypes';
 
 const pulseGlow = keyframes`
     0%, 100% {
@@ -11,65 +13,38 @@ const pulseGlow = keyframes`
     }
 `;
 
-const dataFlow = keyframes`
-    0% { transform: translateX(-100%); opacity: 0; }
-    50% { opacity: 1; }
-    100% { transform: translateX(100%); opacity: 0; }
-`;
-
+// 主容器 - 三列布局
 const CanvasContainer = styled.div`
     width: 100%;
     height: 100%;
     background: linear-gradient(180deg, ${darkTheme.colors.background} 0%, ${darkTheme.colors.surface} 100%);
     position: relative;
     overflow: hidden;
-
-    &::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background:
-            linear-gradient(90deg, transparent 49.5%, rgba(0, 212, 255, 0.05) 49.5%, rgba(0, 212, 255, 0.05) 50.5%, transparent 50.5%),
-            linear-gradient(0deg, transparent 49.5%, rgba(0, 212, 255, 0.05) 49.5%, rgba(0, 212, 255, 0.05) 50.5%, transparent 50.5%);
-        background-size: 30px 30px;
-        pointer-events: none;
-        opacity: 0.6;
-    }
+    display: grid;
+    grid-template-columns: ${CANVAS_LAYOUT.ENDPOINT_WIDTH}px 1fr ${CANVAS_LAYOUT.ENDPOINT_WIDTH}px;
+    padding: ${CANVAS_LAYOUT.OUTER_PADDING}px;
+    gap: ${CANVAS_LAYOUT.GAP}px;
 `;
 
-const NodeContainer = styled.div<{ $position: 'left' | 'right' }>`
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    ${({ $position }) => $position}: 10%;
+// 端点盒子
+const EndpointBox = styled.div<{ $active?: boolean; $type: 'client' | 'server' }>`
+    width: 100%;
+    height: 100%;
+    border-radius: 12px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    z-index: 10;
-`;
-
-const NodeBox = styled.div<{ $active?: boolean; $type: 'client' | 'server' }>`
-    width: 80px;
-    height: 60px;
-    border-radius: 10px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+    padding: 16px 8px;
     color: white;
-    font-weight: 600;
-    font-size: 12px;
-    text-align: center;
     position: relative;
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     background: linear-gradient(
-        135deg,
+        180deg,
         ${({ $type }) => darkTheme.nodeColors[$type].from} 0%,
         ${({ $type }) => darkTheme.nodeColors[$type].to} 100%
     );
     box-shadow:
-        0 4px 15px rgba(0, 0, 0, 0.4),
+        0 4px 20px rgba(0, 0, 0, 0.4),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.1);
 
@@ -77,150 +52,227 @@ const NodeBox = styled.div<{ $active?: boolean; $type: 'client' | 'server' }>`
         $active &&
         css`
             animation: ${pulseGlow} 1.5s ease-in-out infinite;
-            transform: scale(1.05);
         `}
-
-    &::after {
-        content: '';
-        position: absolute;
-        inset: -2px;
-        border-radius: 12px;
-        background: linear-gradient(135deg,
-            rgba(255,255,255,0.2) 0%,
-            transparent 50%,
-            rgba(255,255,255,0.1) 100%);
-        pointer-events: none;
-    }
 `;
 
-const NodeLabel = styled.div`
-    font-size: 9px;
+const EndpointTitle = styled.div`
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    text-align: center;
+`;
+
+const EndpointIP = styled.div`
+    font-size: 10px;
     opacity: 0.7;
-    margin-top: 2px;
-    font-weight: 400;
+    margin-bottom: 12px;
+    text-align: center;
 `;
 
-const NodeType = styled.div`
+const StateContainer = styled.div`
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    width: 100%;
+`;
+
+const StateLabel = styled.div<{ $highlight?: boolean }>`
+    font-size: 10px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    background: ${({ $highlight }) => $highlight ? 'rgba(0, 212, 255, 0.2)' : 'rgba(255,255,255,0.1)'};
+    color: ${({ $highlight }) => $highlight ? darkTheme.colors.primary : 'rgba(255,255,255,0.7)'};
+    text-align: center;
+    width: 100%;
+    transition: all 0.3s ease;
+`;
+
+const StateValue = styled.div`
     font-size: 9px;
-    opacity: 0.6;
-    margin-top: 4px;
-    color: ${darkTheme.colors.textMuted};
+    color: rgba(255,255,255,0.5);
 `;
 
-const ConnectionContainer = styled.div`
-    position: absolute;
-    top: 50%;
-    left: 20%;
-    right: 20%;
-    height: 60px;
-    transform: translateY(-50%);
-    z-index: 1;
+// 中间通道区域 - 数据包在这里移动
+const ChannelArea = styled.div`
+    position: relative;
+    height: 100%;
+    background: rgba(20, 27, 45, 0.5);
+    border-radius: 8px;
+    border: 1px solid ${darkTheme.colors.border};
+    overflow: hidden;
 `;
 
-const ConnectionLine = styled.div<{ $active?: boolean }>`
+// 基准线 - 客户端边界
+const ClientBoundaryLine = styled.div`
     position: absolute;
-    top: 50%;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(
+        180deg,
+        transparent 0%,
+        ${darkTheme.nodeColors.client.from} 20%,
+        ${darkTheme.nodeColors.client.from} 80%,
+        transparent 100%
+    );
+    z-index: 5;
+`;
+
+// 基准线 - 服务端边界
+const ServerBoundaryLine = styled.div`
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(
+        180deg,
+        transparent 0%,
+        ${darkTheme.nodeColors.server.from} 20%,
+        ${darkTheme.nodeColors.server.from} 80%,
+        transparent 100%
+    );
+    z-index: 5;
+`;
+
+// 轨道线 - 显示数据包移动路径
+const TrackLine = styled.div<{ $y: number }>`
+    position: absolute;
     left: 0;
     right: 0;
-    height: 2px;
-    background: ${({ $active }) =>
-        $active
-            ? `linear-gradient(90deg, ${darkTheme.colors.success}, ${darkTheme.colors.primary}, ${darkTheme.colors.success})`
-            : darkTheme.colors.border
-    };
-    transform: translateY(-50%);
-    transition: all 0.4s ease;
-    border-radius: 1px;
-
-    &::before, &::after {
-        content: '';
-        position: absolute;
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        top: 50%;
-        transform: translateY(-50%);
-        background: ${darkTheme.colors.primary};
-        box-shadow: 0 0 10px ${darkTheme.colors.primary};
-        opacity: ${({ $active }) => $active ? 1 : 0};
-        transition: opacity 0.3s ease;
-    }
-
-    &::before { left: -5px; }
-    &::after { right: -5px; }
+    top: ${({ $y }) => $y}%;
+    height: 1px;
+    background: ${darkTheme.colors.border};
+    opacity: 0.2;
 `;
 
-const DataFlowEffect = styled.div<{ $active?: boolean }>`
+// 数据包容器 - 在通道区域内
+const PacketsContainer = styled.div`
     position: absolute;
-    top: 50%;
-    left: 0;
-    width: 100%;
-    height: 4px;
-    transform: translateY(-50%);
-    overflow: hidden;
-    opacity: ${({ $active }) => $active ? 1 : 0};
-    transition: opacity 0.3s ease;
-
-    &::before {
-        content: '';
-        position: absolute;
-        width: 60px;
-        height: 100%;
-        background: linear-gradient(90deg, transparent, ${darkTheme.colors.primary}, transparent);
-        animation: ${dataFlow} 1.5s linear infinite;
-        border-radius: 2px;
-    }
+    inset: 0;
+    z-index: 10;
 `;
 
-const ConnectionLabel = styled.div`
+// 连接状态标签
+const ConnectionLabel = styled.div<{ $active?: boolean }>`
     position: absolute;
-    top: 100%;
+    bottom: 8px;
     left: 50%;
     transform: translateX(-50%);
-    margin-top: 8px;
     font-size: 10px;
-    color: ${darkTheme.colors.textMuted};
-    white-space: nowrap;
+    color: ${({ $active }) => $active ? darkTheme.colors.success : darkTheme.colors.textMuted};
+    padding: 4px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
 `;
 
 interface NetworkCanvasProps {
     clientActive: boolean;
     serverActive: boolean;
     connectionActive: boolean;
+    clientState: TcpConnectionState | null;
+    serverState: TcpConnectionState | null;
     children?: React.ReactNode;
+    clientIp?: string;
+    serverIp?: string;
 }
+
+const getStateDisplayName = (state?: TcpConnectionState | null): string => {
+    if (!state) return '-';
+    const stateNames: Record<TcpConnectionState, string> = {
+        [TcpConnectionState.CLOSED]: 'CLOSED',
+        [TcpConnectionState.LISTEN]: 'LISTEN',
+        [TcpConnectionState.SYN_SENT]: 'SYN_SENT',
+        [TcpConnectionState.SYN_RECEIVED]: 'SYN_RCVD',
+        [TcpConnectionState.ESTABLISHED]: 'ESTABLISHED',
+        [TcpConnectionState.FIN_WAIT_1]: 'FIN_WAIT_1',
+        [TcpConnectionState.FIN_WAIT_2]: 'FIN_WAIT_2',
+        [TcpConnectionState.CLOSE_WAIT]: 'CLOSE_WAIT',
+        [TcpConnectionState.CLOSING]: 'CLOSING',
+        [TcpConnectionState.LAST_ACK]: 'LAST_ACK',
+        [TcpConnectionState.TIME_WAIT]: 'TIME_WAIT',
+    };
+    return stateNames[state] || state;
+};
 
 const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     clientActive,
     serverActive,
     connectionActive,
-    children
+    clientState,
+    serverState,
+    children,
+    clientIp = DEFAULT_NETWORK_CONFIG.CLIENT_IP,
+    serverIp = DEFAULT_NETWORK_CONFIG.SERVER_IP
 }) => {
+    const isEstablished = clientState === TcpConnectionState.ESTABLISHED;
+
+    // 轨道位置 - 数据包在不同轨道上移动
+    const tracks = [15, 30, 45, 60, 75, 90];
+
     return (
         <CanvasContainer>
-            <ConnectionContainer>
-                <ConnectionLine $active={connectionActive} />
-                <DataFlowEffect $active={connectionActive} />
-                <ConnectionLabel>TCP Connection</ConnectionLabel>
-            </ConnectionContainer>
+            {/* 客户端 */}
+            <EndpointBox $active={clientActive} $type="client">
+                <EndpointTitle>客户端</EndpointTitle>
+                <EndpointIP>{clientIp}</EndpointIP>
+                <StateContainer>
+                    <StateLabel $highlight={!!clientState}>
+                        状态
+                    </StateLabel>
+                    <StateValue>{getStateDisplayName(clientState)}</StateValue>
+                    {isEstablished && (
+                        <>
+                            <StateLabel>连接已建立</StateLabel>
+                            <StateValue>可以传输数据</StateValue>
+                        </>
+                    )}
+                </StateContainer>
+            </EndpointBox>
 
-            <NodeContainer $position="left">
-                <NodeBox $active={clientActive} $type="client">
-                    客户端
-                    <NodeLabel>192.168.1.10</NodeLabel>
-                </NodeBox>
-                <NodeType>Client</NodeType>
-            </NodeContainer>
+            {/* 中间通道区域 */}
+            <ChannelArea>
+                {/* 基准线 */}
+                <ClientBoundaryLine />
+                <ServerBoundaryLine />
 
-            <NodeContainer $position="right">
-                <NodeBox $active={serverActive} $type="server">
-                    服务器
-                    <NodeLabel>192.168.1.20</NodeLabel>
-                </NodeBox>
-                <NodeType>Server</NodeType>
-            </NodeContainer>
+                {/* 轨道线 */}
+                {tracks.map((y, index) => (
+                    <TrackLine key={index} $y={y} />
+                ))}
 
-            {children}
+                {/* 数据包容器 */}
+                <PacketsContainer>
+                    {children}
+                </PacketsContainer>
+
+                {/* 连接状态 */}
+                <ConnectionLabel $active={connectionActive}>
+                    {connectionActive ? 'TCP Active' : 'TCP Channel'}
+                </ConnectionLabel>
+            </ChannelArea>
+
+            {/* 服务端 */}
+            <EndpointBox $active={serverActive} $type="server">
+                <EndpointTitle>服务端</EndpointTitle>
+                <EndpointIP>{serverIp}</EndpointIP>
+                <StateContainer>
+                    <StateLabel $highlight={!!serverState}>
+                        状态
+                    </StateLabel>
+                    <StateValue>{getStateDisplayName(serverState)}</StateValue>
+                    {isEstablished && (
+                        <>
+                            <StateLabel>连接已建立</StateLabel>
+                            <StateValue>等待数据</StateValue>
+                        </>
+                    )}
+                </StateContainer>
+            </EndpointBox>
         </CanvasContainer>
     );
 };

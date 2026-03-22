@@ -164,7 +164,7 @@ const protocols = [
         description: '传输控制协议/互联网协议，提供可靠的、面向连接的数据传输服务',
         icon: '🔌',
         available: true,
-        path: '/simulation'
+        path: '/protocol/tcp'
     },
     {
         id: 'http',

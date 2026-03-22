@@ -8,78 +8,85 @@ import NetworkCanvas from '@/components/Animation/NetworkCanvas';
 import Packet from '@/components/Animation/Packet';
 import ProtocolStackPanel from '@/components/Panels/ProtocolStackPanel';
 import PacketDetailPanel from '@/components/Panels/PacketDetailPanel';
-import TimelinePanel from '@/components/Panels/TimelinePanel';
 
-const Container = styled.div`
+// ==================== 页面容器 ====================
+const PageContainer = styled.div`
     width: 100vw;
     height: 100vh;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-rows: 48px 1fr;
     background: ${darkTheme.colors.background};
+    overflow: hidden;
 `;
 
-const MainContent = styled.div`
-    flex: 1;
-    display: flex;
-    justify-content: space-between;
-    padding: 12px;
-    gap: 12px;
-    min-height: 0;
+// ==================== 主内容区域 ====================
+const MainLayout = styled.div`
+    display: grid;
+    grid-template-columns: 220px 1fr 300px;
+    gap: 16px;
+    padding: 16px;
     width: 100%;
-`;
-
-// 左侧操作面板
-const LeftPanel = styled.div`
-    width: 140px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
     height: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
 `;
 
-const ControlsCard = styled.div`
+// ==================== 通用面板样式 ====================
+const Panel = styled.div`
     background: ${darkTheme.colors.surface};
-    border-radius: 10px;
+    border-radius: 12px;
     border: 1px solid ${darkTheme.colors.border};
-    padding: 10px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    overflow: hidden;
 `;
 
-const PanelTitle = styled.div`
-    font-size: 11px;
+const PanelHeader = styled.div`
+    padding: 14px 16px;
+    border-bottom: 1px solid ${darkTheme.colors.border};
+    font-size: 13px;
     font-weight: 600;
-    color: ${darkTheme.colors.textMuted};
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 2px;
+    color: ${darkTheme.colors.text};
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
 `;
 
-const Button = styled.button<{ $variant?: 'primary' | 'secondary' | 'danger'; $animating?: boolean }>`
+const PanelContent = styled.div`
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    flex: 1;
+`;
+
+// ==================== 按钮样式 ====================
+const Button = styled.button<{ $variant?: 'primary' | 'secondary' | 'danger' }>`
     width: 100%;
-    padding: 10px 8px;
-    border-radius: 6px;
-    font-size: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
     font-weight: 600;
-    cursor: ${({ $animating }) => ($animating ? 'wait' : 'pointer')};
+    cursor: pointer;
     transition: all 0.2s ease;
 
     ${({ $variant }) => {
         switch ($variant) {
             case 'primary':
                 return `
-                    background: linear-gradient(135deg, ${darkTheme.colors.primary} 0%, ${darkTheme.colors.primaryDark} 100%);
-                    color: white;
+                    background: ${darkTheme.colors.primary};
+                    color: #000;
                     border: none;
-                    &:hover:not(:disabled) { transform: translateY(-1px); }
+                    &:hover:not(:disabled) { opacity: 0.9; }
                 `;
             case 'danger':
                 return `
-                    background: linear-gradient(135deg, ${darkTheme.colors.error} 0%, #dc2626 100%);
+                    background: ${darkTheme.colors.error};
                     color: white;
                     border: none;
+                    &:hover:not(:disabled) { opacity: 0.9; }
                 `;
             default:
                 return `
@@ -92,141 +99,252 @@ const Button = styled.button<{ $variant?: 'primary' | 'secondary' | 'danger'; $a
     }}
 
     &:disabled {
-        opacity: 0.5;
+        opacity: 0.4;
         cursor: not-allowed;
     }
 `;
 
+const ButtonGroup = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+`;
+
+// ==================== 速度控制 ====================
 const SpeedControl = styled.div`
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
 `;
 
 const SpeedLabel = styled.div`
-    font-size: 11px;
+    font-size: 12px;
     color: ${darkTheme.colors.textMuted};
 `;
 
 const SpeedButtons = styled.div`
     display: flex;
-    gap: 4px;
+    gap: 6px;
 `;
 
-const SpeedButton = styled.button<{ $active?: boolean }>`
+const SpeedBtn = styled.button<{ $active?: boolean }>`
     flex: 1;
-    padding: 6px 4px;
-    background: ${({ $active }) => $active ? 'rgba(0, 212, 255, 0.15)' : 'transparent'};
+    padding: 8px;
+    background: ${({ $active }) => $active ? darkTheme.colors.primary : 'transparent'};
     border: 1px solid ${({ $active }) => $active ? darkTheme.colors.primary : darkTheme.colors.border};
-    border-radius: 4px;
-    color: ${({ $active }) => $active ? darkTheme.colors.primary : darkTheme.colors.textMuted};
-    font-size: 10px;
+    border-radius: 6px;
+    color: ${({ $active }) => $active ? '#000' : darkTheme.colors.textMuted};
+    font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
 
     &:hover {
         border-color: ${darkTheme.colors.primary};
-        color: ${darkTheme.colors.primary};
+        color: ${({ $active }) => $active ? '#000' : darkTheme.colors.primary};
     }
 `;
 
-const StatusBadge = styled.div<{ $status: 'idle' | 'connected' | 'closed' }>`
+// ==================== 状态显示 ====================
+const StatusRow = styled.div`
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 8px 10px;
+    gap: 10px;
+    padding: 12px;
     background: ${darkTheme.colors.surfaceLight};
-    border-radius: 6px;
-    border: 1px solid ${darkTheme.colors.border};
+    border-radius: 8px;
 `;
 
-const StatusDot = styled.div<{ $status: 'idle' | 'connected' | 'closed' }>`
-    width: 8px;
-    height: 8px;
+const StatusIndicator = styled.div<{ $status: 'idle' | 'connected' | 'closed' }>`
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: ${({ $status }) =>
         $status === 'connected' ? darkTheme.colors.success :
             $status === 'closed' ? darkTheme.colors.error : darkTheme.colors.textMuted};
     box-shadow: ${({ $status }) =>
-        $status === 'connected' ? `0 0 8px ${darkTheme.colors.success}` : 'none'};
+        $status === 'connected' ? `0 0 10px ${darkTheme.colors.success}` : 'none'};
 `;
 
-const StatusText = styled.span`
-    font-size: 10px;
+const StatusLabel = styled.span`
+    font-size: 13px;
     color: ${darkTheme.colors.text};
     font-weight: 500;
 `;
 
-const AnimationStatus = styled.div`
-    padding: 8px 10px;
+// ==================== 动画状态 ====================
+const AnimationMessage = styled.div`
+    padding: 12px;
     background: linear-gradient(90deg, rgba(0, 212, 255, 0.1), transparent);
     border-left: 3px solid ${darkTheme.colors.primary};
-    border-radius: 0 6px 6px 0;
-    font-size: 10px;
+    border-radius: 0 8px 8px 0;
+    font-size: 12px;
     color: ${darkTheme.colors.text};
-    line-height: 1.4;
 `;
 
-const ConnectionInfo = styled.div`
+// ==================== 错误卡片 ====================
+const ErrorBox = styled.div`
+    padding: 12px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid ${darkTheme.colors.error};
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+`;
+
+const ErrorText = styled.div`
+    font-size: 12px;
+    color: ${darkTheme.colors.error};
+    font-weight: 500;
+`;
+
+const ErrorDetail = styled.div`
+    font-size: 11px;
+    color: ${darkTheme.colors.textMuted};
+`;
+
+const ErrorActions = styled.div`
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+`;
+
+const ErrorBtn = styled.button<{ $primary?: boolean }>`
+    flex: 1;
     padding: 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+
+    ${({ $primary }) => $primary ? `
+        background: ${darkTheme.colors.error};
+        color: white;
+        border: none;
+    ` : `
+        background: transparent;
+        color: ${darkTheme.colors.text};
+        border: 1px solid ${darkTheme.colors.border};
+    `}
+`;
+
+// ==================== 连接信息 ====================
+const ConnectionGrid = styled.div`
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+`;
+
+const InfoItem = styled.div`
+    padding: 10px;
     background: ${darkTheme.colors.surfaceLight};
     border-radius: 6px;
-    font-size: 9px;
+    text-align: center;
+`;
+
+const InfoLabel = styled.div`
+    font-size: 10px;
     color: ${darkTheme.colors.textMuted};
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-
-    div {
-        display: flex;
-        justify-content: space-between;
-    }
-
-    strong {
-        color: ${darkTheme.colors.text};
-        font-weight: 500;
-    }
+    margin-bottom: 4px;
 `;
 
-// 中间动画区域 - 弹性扩展
-const CenterPanel = styled.div`
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    min-width: 0;
-    height: 100%;
+const InfoValue = styled.div`
+    font-size: 13px;
+    color: ${darkTheme.colors.text};
+    font-weight: 600;
 `;
 
-const AnimationContainer = styled.div`
-    flex: 1;
-    min-height: 300px;
+// ==================== 中间动画区域 ====================
+const AnimationPanel = styled.div`
     background: ${darkTheme.colors.surface};
-    border-radius: 10px;
+    border-radius: 12px;
     border: 1px solid ${darkTheme.colors.border};
     position: relative;
     overflow: hidden;
+    height: 100%;
 `;
 
-const AnimationWrapper = styled.div`
+const AnimationArea = styled.div`
     position: absolute;
     inset: 0;
 `;
 
-// 右侧详情面板
-const RightPanel = styled.div`
-    width: 260px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    height: 100%;
+// ==================== 悬浮时间线 ====================
+const TimelineBar = styled.div`
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    background: rgba(20, 27, 45, 0.95);
+    backdrop-filter: blur(8px);
+    border-radius: 10px;
+    border: 1px solid ${darkTheme.colors.border};
+    padding: 14px 24px;
+    min-width: 400px;
 `;
 
+const TimelineTitle = styled.div`
+    font-size: 13px;
+    font-weight: 600;
+    color: ${darkTheme.colors.text};
+    margin-bottom: 12px;
+    text-align: center;
+`;
+
+const TimelineProgress = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+`;
+
+const ProgressStep = styled.div<{ $active?: boolean; $done?: boolean }>`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    &:not(:last-child)::after {
+        content: '';
+        width: 60px;
+        height: 2px;
+        background: ${({ $done }) => $done ? darkTheme.colors.primary : darkTheme.colors.border};
+    }
+`;
+
+const ProgressDot = styled.div<{ $active?: boolean; $done?: boolean }>`
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: ${({ $active, $done }) =>
+        $active ? darkTheme.colors.primary :
+            $done ? darkTheme.colors.success : darkTheme.colors.surfaceLight};
+    border: 2px solid ${({ $active, $done }) =>
+        $active ? darkTheme.colors.primary :
+            $done ? darkTheme.colors.success : darkTheme.colors.border};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: white;
+    box-shadow: ${({ $active }) => $active ? `0 0 12px ${darkTheme.colors.glow}` : 'none'};
+`;
+
+const ProgressLabel = styled.span<{ $active?: boolean; $done?: boolean }>`
+    font-size: 12px;
+    font-weight: 500;
+    color: ${({ $active, $done }) =>
+        $active ? darkTheme.colors.primary :
+            $done ? darkTheme.colors.success : darkTheme.colors.textMuted};
+    white-space: nowrap;
+`;
+
+// ==================== 主组件 ====================
 const TcpProtocolVisualizer: React.FC = () => {
     const diagramRef = useRef<HTMLDivElement>(null);
-    const [speed, setSpeed] = useState(1);
+    const [speed, setSpeed] = useState(1);  // 默认1x速度
 
     const {
         connection,
@@ -237,15 +355,17 @@ const TcpProtocolVisualizer: React.FC = () => {
         selectedPacket,
         currentPhase,
         timelineSteps,
+        error,
         performHandshake,
         performDataTransfer,
         performClose,
         resetConnection,
         updateContainerSize,
         selectPacket,
-    } = useTcpAnimation();
+        clearErrorState,
+        retryFailedPhase,
+    } = useTcpAnimation(speed);
 
-    // 使用 ResizeObserver 监听容器尺寸变化
     useEffect(() => {
         const diagram = diagramRef.current;
         if (!diagram) return;
@@ -258,24 +378,19 @@ const TcpProtocolVisualizer: React.FC = () => {
         });
 
         resizeObserver.observe(diagram);
-
         const { clientWidth, clientHeight } = diagram;
         if (clientWidth > 0 && clientHeight > 0) {
             updateContainerSize(clientWidth, clientHeight);
         }
 
-        return () => {
-            resizeObserver.disconnect();
-        };
+        return () => resizeObserver.disconnect();
     }, [updateContainerSize]);
 
-    // 事件处理
     const handleHandshake = useCallback(() => performHandshake(), [performHandshake]);
     const handleDataTransfer = useCallback(() => performDataTransfer(), [performDataTransfer]);
     const handleClose = useCallback(() => performClose(), [performClose]);
     const handleReset = useCallback(() => resetConnection(), [resetConnection]);
 
-    // 连接状态
     const getConnectionStatus = (): 'idle' | 'connected' | 'closed' => {
         if (!connection) return 'idle';
         if (connection.state === TcpConnectionState.CLOSED) return 'closed';
@@ -283,7 +398,6 @@ const TcpProtocolVisualizer: React.FC = () => {
         return 'idle';
     };
 
-    // 获取时间线标题
     const getTimelineTitle = () => {
         switch (currentPhase) {
             case 'handshake': return '三次握手';
@@ -296,109 +410,161 @@ const TcpProtocolVisualizer: React.FC = () => {
     const connectionStatus = getConnectionStatus();
 
     return (
-        <Container>
+        <PageContainer>
             <Header />
+            <MainLayout>
+                {/* 左侧控制面板 */}
+                <Panel>
+                    <PanelHeader>🎮 操作控制</PanelHeader>
+                    <PanelContent>
+                        <ButtonGroup>
+                            <Button
+                                $variant="primary"
+                                onClick={handleHandshake}
+                                disabled={isPlaying || !!connection}
+                            >
+                                {connection ? '已连接' : '开始握手'}
+                            </Button>
+                            <Button
+                                $variant="secondary"
+                                onClick={handleDataTransfer}
+                                disabled={isPlaying || !connection || connection.state !== TcpConnectionState.ESTABLISHED}
+                            >
+                                发送数据
+                            </Button>
+                            <Button
+                                $variant="danger"
+                                onClick={handleClose}
+                                disabled={isPlaying || !connection || connection.state !== TcpConnectionState.ESTABLISHED}
+                            >
+                                关闭连接
+                            </Button>
+                            <Button onClick={handleReset} disabled={isPlaying}>
+                                重置
+                            </Button>
+                        </ButtonGroup>
 
-            <MainContent>
-                {/* 左侧操作面板 */}
-                <LeftPanel>
-                    <ControlsCard>
-                        <PanelTitle>操作控制</PanelTitle>
-                        <Button
-                            onClick={handleHandshake}
-                            disabled={isPlaying || !!connection}
-                            $variant="primary"
-                            $animating={isPlaying}
-                        >
-                            {connection ? '已连接' : '三次握手'}
-                        </Button>
-                        <Button
-                            onClick={handleDataTransfer}
-                            disabled={isPlaying || !connection || connection.state !== TcpConnectionState.ESTABLISHED}
-                            $variant="secondary"
-                        >
-                            发送数据
-                        </Button>
-                        <Button
-                            onClick={handleClose}
-                            disabled={isPlaying || !connection || connection.state !== TcpConnectionState.ESTABLISHED}
-                            $variant="danger"
-                        >
-                            四次挥手
-                        </Button>
-                        <Button onClick={handleReset} disabled={isPlaying}>
-                            重置
-                        </Button>
-                    </ControlsCard>
-
-                    <ControlsCard>
                         <SpeedControl>
                             <SpeedLabel>动画速度</SpeedLabel>
                             <SpeedButtons>
-                                <SpeedButton $active={speed === 0.5} onClick={() => setSpeed(0.5)}>0.5x</SpeedButton>
-                                <SpeedButton $active={speed === 1} onClick={() => setSpeed(1)}>1x</SpeedButton>
-                                <SpeedButton $active={speed === 2} onClick={() => setSpeed(2)}>2x</SpeedButton>
+                                <SpeedBtn $active={speed === 0.5} onClick={() => setSpeed(0.5)}>0.5x</SpeedBtn>
+                                <SpeedBtn $active={speed === 1} onClick={() => setSpeed(1)}>1x</SpeedBtn>
+                                <SpeedBtn $active={speed === 2} onClick={() => setSpeed(2)}>2x</SpeedBtn>
                             </SpeedButtons>
                         </SpeedControl>
-                    </ControlsCard>
 
-                    <StatusBadge $status={connectionStatus}>
-                        <StatusDot $status={connectionStatus} />
-                        <StatusText>
-                            {connectionStatus === 'connected' ? '已连接' :
-                                connectionStatus === 'closed' ? '已关闭' : '未连接'}
-                        </StatusText>
-                    </StatusBadge>
+                        <StatusRow>
+                            <StatusIndicator $status={connectionStatus} />
+                            <StatusLabel>
+                                {connectionStatus === 'connected' ? '已连接' :
+                                    connectionStatus === 'closed' ? '已关闭' : '未连接'}
+                            </StatusLabel>
+                        </StatusRow>
 
-                    {animationStatus && <AnimationStatus>{animationStatus}</AnimationStatus>}
+                        {animationStatus && <AnimationMessage>{animationStatus}</AnimationMessage>}
 
-                    {connection && (
-                        <ConnectionInfo>
-                            <div>本地端口: <strong>{connection.sourcePort}</strong></div>
-                            <div>远程端口: <strong>{connection.destinationPort}</strong></div>
-                            <div>序列号: <strong>{connection.localSeqNum}</strong></div>
-                            <div>窗口: <strong>{connection.windowSize}</strong></div>
-                        </ConnectionInfo>
-                    )}
-                </LeftPanel>
+                        {error.hasError && (
+                            <ErrorBox>
+                                <ErrorText>⚠️ {error.message}</ErrorText>
+                                {error.details && <ErrorDetail>{error.details}</ErrorDetail>}
+                                <ErrorActions>
+                                    <ErrorBtn $primary onClick={retryFailedPhase}>重试</ErrorBtn>
+                                    <ErrorBtn onClick={clearErrorState}>关闭</ErrorBtn>
+                                </ErrorActions>
+                            </ErrorBox>
+                        )}
+
+                        {connection && (
+                            <ConnectionGrid>
+                                <InfoItem>
+                                    <InfoLabel>本地端口</InfoLabel>
+                                    <InfoValue>{connection.sourcePort}</InfoValue>
+                                </InfoItem>
+                                <InfoItem>
+                                    <InfoLabel>远程端口</InfoLabel>
+                                    <InfoValue>{connection.destinationPort}</InfoValue>
+                                </InfoItem>
+                                <InfoItem>
+                                    <InfoLabel>序列号</InfoLabel>
+                                    <InfoValue>{connection.localSeqNum}</InfoValue>
+                                </InfoItem>
+                                <InfoItem>
+                                    <InfoLabel>窗口大小</InfoLabel>
+                                    <InfoValue>{connection.windowSize}</InfoValue>
+                                </InfoItem>
+                            </ConnectionGrid>
+                        )}
+                    </PanelContent>
+                </Panel>
 
                 {/* 中间动画区域 */}
-                <CenterPanel>
-                    <AnimationContainer>
-                        <AnimationWrapper ref={diagramRef}>
-                            <NetworkCanvas
-                                clientActive={animationUI.clientActive}
-                                serverActive={animationUI.serverActive}
-                                connectionActive={animationUI.connectionLineActive}
-                            >
-                                <Packet
-                                    x={animationUI.packetPosition.x}
-                                    y={animationUI.packetPosition.y}
-                                    type={animationUI.currentPacketType}
-                                    moving={isPlaying}
-                                    onClick={() => {
-                                        if (packetHistory.length > 0) {
-                                            const lastPacket = packetHistory[packetHistory.length - 1];
-                                            selectPacket(lastPacket.packet);
-                                        }
-                                    }}
-                                />
-                            </NetworkCanvas>
-                        </AnimationWrapper>
-                    </AnimationContainer>
-
+                <AnimationPanel>
                     {timelineSteps.length > 0 && (
-                        <TimelinePanel title={getTimelineTitle()} steps={timelineSteps} />
+                        <TimelineBar>
+                            <TimelineTitle>⏱️ {getTimelineTitle()}</TimelineTitle>
+                            <TimelineProgress>
+                                {timelineSteps.map((step, index) => (
+                                    <ProgressStep
+                                        key={step.id}
+                                        $active={step.active}
+                                        $done={step.completed}
+                                    >
+                                        <ProgressDot $active={step.active} $done={step.completed}>
+                                            {step.completed ? '✓' : step.active ? '●' : (index + 1)}
+                                        </ProgressDot>
+                                        <ProgressLabel $active={step.active} $done={step.completed}>
+                                            {step.label}
+                                        </ProgressLabel>
+                                    </ProgressStep>
+                                ))}
+                            </TimelineProgress>
+                        </TimelineBar>
                     )}
-                </CenterPanel>
+                    <AnimationArea ref={diagramRef}>
+                        <NetworkCanvas
+                            clientActive={animationUI.clientActive}
+                            serverActive={animationUI.serverActive}
+                            connectionActive={animationUI.connectionLineActive}
+                            clientState={animationUI.clientState}
+                            serverState={animationUI.serverState}
+                        >
+                            {animationUI.activePackets.map((packet) => (
+                                    <Packet
+                                        key={packet.id}
+                                        x={packet.position.x}
+                                        y={packet.position.y}
+                                        type={packet.type}
+                                        moving={!packet.completed}
+                                        direction={packet.direction}
+                                        seqNum={packet.seqNum}
+                                        ackNum={packet.ackNum}
+                                        onClick={() => {
+                                            const historyPacket = packetHistory.find(
+                                                p => p.packet.tcpHeader?.sequenceNumber === packet.seqNum
+                                            );
+                                            if (historyPacket) {
+                                                selectPacket(historyPacket.packet);
+                                            }
+                                        }}
+                                    />
+                                ))}
+                        </NetworkCanvas>
+                    </AnimationArea>
+                </AnimationPanel>
 
-                {/* 右侧详情面板 */}
-                <RightPanel>
-                    <ProtocolStackPanel activeLayers={animationUI.activeLayers} />
-                    <PacketDetailPanel packet={selectedPacket} />
-                </RightPanel>
-            </MainContent>
-        </Container>
+                {/* 右侧信息面板 */}
+                <Panel>
+                    <PanelHeader>📡 协议栈</PanelHeader>
+                    <PanelContent style={{ flex: '0 0 auto' }}>
+                        <ProtocolStackPanel activeLayers={animationUI.activeLayers} />
+                    </PanelContent>
+                    <PanelHeader>📦 数据包详情</PanelHeader>
+                    <PanelContent style={{ flex: '1' }}>
+                        <PacketDetailPanel packet={selectedPacket} />
+                    </PanelContent>
+                </Panel>
+            </MainLayout>
+        </PageContainer>
     );
 };
 

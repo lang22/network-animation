@@ -6,6 +6,7 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: '[name].[contenthash].js',
+    publicPath: '/',
     clean: true,
   },
   resolve: {
@@ -25,7 +26,7 @@ module.exports = {
     rules: [
       {
         test: /\.(ts|tsx)$/,
-        exclude: /node_modules/,
+        exclude: [/node_modules/, /__tests__/],
         use: {
           loader: 'ts-loader',
           options: {
@@ -35,7 +36,7 @@ module.exports = {
       },
       {
         test: /\.js$/,
-        exclude: /node_modules/,
+        exclude: [/node_modules/, /__tests__/],
         use: {
           loader: 'babel-loader',
           options: {
@@ -69,6 +70,7 @@ module.exports = {
     port: 3000,
     open: true,
     hot: true,
+    historyApiFallback: true,
   },
   optimization: {
     splitChunks: {

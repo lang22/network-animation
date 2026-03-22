@@ -7,29 +7,38 @@ import {
     play,
     pause,
     setAnimationUI,
-    setPacketPosition,
-    setPacketType,
+    addActivePacket,
+    updateActivePacket,
+    completeActivePacket,
+    removeActivePacket,
+    clearActivePackets,
     setActiveLayers,
     setClientActive,
     setServerActive,
     setConnectionLineActive,
+    setClientState,
+    setServerState,
     setContainerSize,
     addPacketToHistory,
     setSelectedPacket,
     setCurrentPhase,
     updateTimelineStep,
+    setError,
+    clearError,
+    ActivePacket,
 } from '@/store/slices/simulationSlice';
 import { TcpService } from '@/services/protocols/tcpService';
-import { TcpConnection, TcpConnectionState, NetworkPacket } from '@/types/networkTypes';
+import { TcpConnection, TcpConnectionState, NetworkPacket, TcpFlags } from '@/types/networkTypes';
 import {
     NETWORK_POSITIONS,
-    PACKET_TYPES,
     ANIMATION_DURATION,
     DEFAULT_NETWORK_CONFIG,
     PacketType,
+    calculatePacketPosition,
+    calculateBoundaryLines,
 } from '@/utils/constants';
 
-export const useTcpAnimation = () => {
+export const useTcpAnimation = (speed: number = 1) => {
     const dispatch = useAppDispatch();
     const {
         connection,
@@ -39,14 +48,26 @@ export const useTcpAnimation = () => {
         packetHistory,
         selectedPacket,
         currentPhase,
-        timelineSteps
+        timelineSteps,
+        error
     } = useAppSelector((state) => state.simulation);
 
     const animationFrameRef = useRef<number | null>(null);
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
     const isMountedRef = useRef<boolean>(true);
+    const speedRef = useRef<number>(speed);
+
+    // 更新 speed ref
+    useEffect(() => {
+        speedRef.current = speed;
+    }, [speed]);
 
     const containerSize = animationUI.containerSize;
+
+    // 根据速度计算实际动画持续时间
+    const getAnimationDuration = useCallback((baseDuration: number) => {
+        return baseDuration / speedRef.current;
+    }, []);
 
     // 清理动画资源
     const cleanupAnimation = useCallback(() => {
@@ -79,10 +100,8 @@ export const useTcpAnimation = () => {
     // 动画数据包移动
     const animatePacketMove = useCallback(
         (
-            startXPercent: number,
-            startYPercent: number,
-            endXPercent: number,
-            endYPercent: number,
+            fromClient: boolean,  // true: 从客户端发送，false: 从服务端发送
+            trackY: number,       // 轨道Y位置百分比
             packetType: PacketType,
             packet: NetworkPacket,
             stepId: string,
@@ -94,32 +113,50 @@ export const useTcpAnimation = () => {
                     return;
                 }
 
-                const startPos = {
-                    x: (containerSize.width * startXPercent) / 100,
-                    y: (containerSize.height * startYPercent) / 100,
-                };
-                const endPos = {
-                    x: (containerSize.width * endXPercent) / 100,
-                    y: (containerSize.height * endYPercent) / 100,
-                };
+                // 根据速度调整动画持续时间
+                const adjustedDuration = getAnimationDuration(duration);
+
+                // 计算起始位置（progress = 0）
+                const startPos = calculatePacketPosition(
+                    fromClient,
+                    trackY,
+                    0,
+                    containerSize.width,
+                    containerSize.height
+                );
+
+                // 创建唯一的数据包ID
+                const packetId = `packet_${stepId}_${Date.now()}`;
 
                 // 设置当前步骤为 active
                 dispatch(updateTimelineStep({ id: stepId, active: true }));
-                dispatch(setPacketPosition(startPos));
-                dispatch(setPacketType(packetType));
-                dispatch(setPacketType(packetType));
 
-                // 激活节点状态
-                if (startPos.x < endPos.x) {
+                // 创建活动数据包
+                const activePacket: ActivePacket = {
+                    id: packetId,
+                    type: packetType,
+                    position: { ...startPos },
+                    targetPosition: { x: 0, y: 0 }, // 将在动画过程中更新
+                    startTime: performance.now(),
+                    duration: adjustedDuration,
+                    seqNum: packet.tcpHeader?.sequenceNumber,
+                    ackNum: packet.tcpHeader?.acknowledgmentNumber,
+                    completed: false,
+                    direction: fromClient ? 'right' : 'left',
+                };
+                dispatch(addActivePacket(activePacket));
+
+                // 激活发送方节点
+                if (fromClient) {
                     dispatch(setClientActive(true));
                     setTimeout(() => {
                         if (isMountedRef.current) dispatch(setServerActive(true));
-                    }, ANIMATION_DURATION.STATE_TRANSITION);
+                    }, getAnimationDuration(ANIMATION_DURATION.STATE_TRANSITION));
                 } else {
                     dispatch(setServerActive(true));
                     setTimeout(() => {
                         if (isMountedRef.current) dispatch(setClientActive(true));
-                    }, ANIMATION_DURATION.STATE_TRANSITION);
+                    }, getAnimationDuration(ANIMATION_DURATION.STATE_TRANSITION));
                 }
 
                 dispatch(setConnectionLineActive(true));
@@ -128,31 +165,49 @@ export const useTcpAnimation = () => {
 
                 const animate = (currentTime: number) => {
                     if (!isMountedRef.current) {
+                        dispatch(removeActivePacket(packetId));
                         resolve();
                         return;
                     }
 
                     const elapsed = currentTime - startTime;
-                    const progress = Math.min(elapsed / duration, 1);
+                    const progress = Math.min(elapsed / adjustedDuration, 1);
 
-                    const currentX = startPos.x + (endPos.x - startPos.x) * progress;
-                    const currentY = startPos.y + (endPos.y - startPos.y) * progress;
+                    // 使用easeInOut缓动
+                    const easeProgress = progress < 0.5
+                        ? 2 * progress * progress
+                        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
 
-                    dispatch(setPacketPosition({ x: currentX, y: currentY }));
+                    // 根据进度计算当前位置
+                    const currentPos = calculatePacketPosition(
+                        fromClient,
+                        trackY,
+                        easeProgress,
+                        containerSize.width,
+                        containerSize.height
+                    );
+
+                    dispatch(updateActivePacket({ id: packetId, position: currentPos }));
 
                     if (progress < 1) {
                         animationFrameRef.current = requestAnimationFrame(animate);
                     } else {
+                        // 标记数据包完成
+                        dispatch(completeActivePacket(packetId));
+
                         // 完成步骤
                         dispatch(updateTimelineStep({ id: stepId, active: false, completed: true }));
 
+                        // 延迟后移除数据包
                         setTimeout(() => {
                             if (isMountedRef.current) {
+                                dispatch(removeActivePacket(packetId));
                                 dispatch(setClientActive(false));
                                 dispatch(setServerActive(false));
                                 dispatch(setConnectionLineActive(false));
                             }
-                        }, ANIMATION_DURATION.STATE_TRANSITION);
+                        }, ANIMATION_DURATION.PACKET_DISPLAY);
+
                         resolve();
                     }
                 };
@@ -160,7 +215,7 @@ export const useTcpAnimation = () => {
                 animationFrameRef.current = requestAnimationFrame(animate);
             });
         },
-        [dispatch, containerSize]
+        [dispatch, containerSize, getAnimationDuration]
     );
 
     // 执行三次握手动画
@@ -171,6 +226,10 @@ export const useTcpAnimation = () => {
         dispatch(setCurrentPhase('handshake'));
         dispatch(setAnimationStatus('开始 TCP 三次握手...'));
 
+        // 初始化状态
+        dispatch(setClientState(TcpConnectionState.CLOSED));
+        dispatch(setServerState(TcpConnectionState.LISTEN));
+
         try {
             let connection = TcpService.createConnection(
                 DEFAULT_NETWORK_CONFIG.CLIENT_IP,
@@ -179,9 +238,12 @@ export const useTcpAnimation = () => {
                 DEFAULT_NETWORK_CONFIG.SERVER_PORT
             );
 
-            // SYN
+            // SYN - 客户端发起连接
             dispatch(setAnimationStatus('步骤 1/3: 客户端发送 SYN'));
-            const synPackets = TcpService.initiateHandshake(connection);
+            dispatch(setClientState(TcpConnectionState.SYN_SENT));
+
+            const [connectionAfterSyn, synPackets] = TcpService.initiateHandshake(connection);
+            connection = connectionAfterSyn;
             const synPacket = synPackets[0];
 
             dispatch(addPacketToHistory({
@@ -192,10 +254,8 @@ export const useTcpAnimation = () => {
             }));
 
             await animatePacketMove(
-                NETWORK_POSITIONS.CLIENT.xPercent,
-                NETWORK_POSITIONS.HANDSHAKE_Y_PERCENT,
-                NETWORK_POSITIONS.SERVER.xPercent,
-                NETWORK_POSITIONS.HANDSHAKE_Y_PERCENT,
+                true,  // 从客户端发送
+                NETWORK_POSITIONS.TRACKS.SYN,
                 'SYN',
                 synPacket,
                 'syn'
@@ -203,10 +263,12 @@ export const useTcpAnimation = () => {
 
             if (!isMountedRef.current) return;
 
-            // SYN-ACK
+            // SYN-ACK - 服务器响应
             dispatch(setAnimationStatus('步骤 2/3: 服务器发送 SYN-ACK'));
-            const [connectionAfterSyn, synAckPacket] = TcpService.handleSynAndSendSynAck(connection, synPacket);
-            connection = connectionAfterSyn;
+            dispatch(setServerState(TcpConnectionState.SYN_RECEIVED));
+
+            const [connectionAfterSynAck, synAckPacket] = TcpService.handleSynAndSendSynAck(connection, synPacket);
+            connection = connectionAfterSynAck;
 
             dispatch(addPacketToHistory({
                 id: `syn_ack_${Date.now()}`,
@@ -216,10 +278,8 @@ export const useTcpAnimation = () => {
             }));
 
             await animatePacketMove(
-                NETWORK_POSITIONS.SERVER.xPercent,
-                NETWORK_POSITIONS.HANDSHAKE_Y_PERCENT,
-                NETWORK_POSITIONS.CLIENT.xPercent,
-                NETWORK_POSITIONS.HANDSHAKE_Y_PERCENT,
+                false,  // 从服务端发送
+                NETWORK_POSITIONS.TRACKS.SYN_ACK,
                 'SYN-ACK',
                 synAckPacket,
                 'syn-ack'
@@ -227,8 +287,10 @@ export const useTcpAnimation = () => {
 
             if (!isMountedRef.current) return;
 
-            // ACK
+            // ACK - 客户端确认，连接建立
             dispatch(setAnimationStatus('步骤 3/3: 客户端发送 ACK，连接建立'));
+            dispatch(setClientState(TcpConnectionState.ESTABLISHED));
+
             const [establishedConnection, ackPacket] = TcpService.handleSynAckAndSendAck(connection, synAckPacket);
             connection = establishedConnection;
 
@@ -240,10 +302,8 @@ export const useTcpAnimation = () => {
             }));
 
             await animatePacketMove(
-                NETWORK_POSITIONS.CLIENT.xPercent,
-                NETWORK_POSITIONS.HANDSHAKE_Y_PERCENT,
-                NETWORK_POSITIONS.SERVER.xPercent,
-                NETWORK_POSITIONS.HANDSHAKE_Y_PERCENT,
+                true,  // 从客户端发送
+                NETWORK_POSITIONS.TRACKS.HANDSHAKE_ACK,
                 'ACK',
                 ackPacket,
                 'ack'
@@ -251,6 +311,8 @@ export const useTcpAnimation = () => {
 
             if (!isMountedRef.current) return;
 
+            // 服务器收到ACK，连接建立
+            dispatch(setServerState(TcpConnectionState.ESTABLISHED));
             dispatch(setConnection(connection));
             dispatch(setAnimationStatus('✅ TCP 三次握手完成！'));
             dispatch(setActiveLayers(['transport']));
@@ -263,9 +325,14 @@ export const useTcpAnimation = () => {
                 }
             }, ANIMATION_DURATION.CLEANUP_DELAY);
         } catch (error) {
-            console.error('握手动画失败:', error);
-            dispatch(setAnimationStatus('❌ 动画执行失败'));
-            dispatch(pause());
+            const errorMessage = error instanceof Error ? error.message : '未知错误';
+            dispatch(setError({
+                hasError: true,
+                message: '三次握手失败',
+                details: errorMessage,
+                phase: 'handshake'
+            }));
+            dispatch(setAnimationStatus('❌ 三次握手失败'));
         }
     }, [dispatch, animatePacketMove]);
 
@@ -277,10 +344,14 @@ export const useTcpAnimation = () => {
         dispatch(setCurrentPhase('data'));
         dispatch(setAnimationStatus('开始数据传输...'));
 
+        // 确保状态为 ESTABLISHED
+        dispatch(setClientState(TcpConnectionState.ESTABLISHED));
+        dispatch(setServerState(TcpConnectionState.ESTABLISHED));
+
         try {
             const dataPayload = 'Hello Server!';
 
-            // DATA
+            // DATA - 客户端发送数据
             dispatch(setAnimationStatus('发送数据包到服务器'));
             const [updatedConnection, dataPacket] = TcpService.sendData(connection, dataPayload);
 
@@ -292,10 +363,8 @@ export const useTcpAnimation = () => {
             }));
 
             await animatePacketMove(
-                NETWORK_POSITIONS.CLIENT.xPercent,
-                NETWORK_POSITIONS.DATA_TRANSFER_Y_PERCENT,
-                NETWORK_POSITIONS.SERVER.xPercent,
-                NETWORK_POSITIONS.DATA_TRANSFER_Y_PERCENT,
+                true,  // 从客户端发送
+                NETWORK_POSITIONS.TRACKS.DATA,
                 'DATA',
                 dataPacket,
                 'data'
@@ -303,7 +372,7 @@ export const useTcpAnimation = () => {
 
             if (!isMountedRef.current) return;
 
-            // ACK
+            // ACK - 服务器确认收到
             dispatch(setAnimationStatus('服务器发送 ACK 确认'));
             const ackPacket = TcpService.sendAck(updatedConnection, dataPacket);
 
@@ -315,10 +384,8 @@ export const useTcpAnimation = () => {
             }));
 
             await animatePacketMove(
-                NETWORK_POSITIONS.SERVER.xPercent,
-                NETWORK_POSITIONS.DATA_TRANSFER_Y_PERCENT,
-                NETWORK_POSITIONS.CLIENT.xPercent,
-                NETWORK_POSITIONS.DATA_TRANSFER_Y_PERCENT,
+                false,  // 从服务端发送
+                NETWORK_POSITIONS.TRACKS.DATA_ACK,
                 'ACK',
                 ackPacket,
                 'data-ack'
@@ -340,9 +407,14 @@ export const useTcpAnimation = () => {
                 }
             }, ANIMATION_DURATION.CLEANUP_DELAY);
         } catch (error) {
-            console.error('数据传输动画失败:', error);
-            dispatch(setAnimationStatus('❌ 动画执行失败'));
-            dispatch(pause());
+            const errorMessage = error instanceof Error ? error.message : '未知错误';
+            dispatch(setError({
+                hasError: true,
+                message: '数据传输失败',
+                details: errorMessage,
+                phase: 'data'
+            }));
+            dispatch(setAnimationStatus('❌ 数据传输失败'));
         }
     }, [connection, dispatch, animatePacketMove]);
 
@@ -354,11 +426,17 @@ export const useTcpAnimation = () => {
         dispatch(setCurrentPhase('close'));
         dispatch(setAnimationStatus('开始 TCP 四次挥手...'));
 
+        // 确保状态为 ESTABLISHED
+        dispatch(setClientState(TcpConnectionState.ESTABLISHED));
+        dispatch(setServerState(TcpConnectionState.ESTABLISHED));
+
         try {
             let currentConnection = connection;
 
-            // FIN 1
+            // FIN 1 - 客户端发起关闭
             dispatch(setAnimationStatus('步骤 1/4: 客户端发送 FIN'));
+            dispatch(setClientState(TcpConnectionState.FIN_WAIT_1));
+
             const [connAfterFin, finPacket] = TcpService.initiateClose(currentConnection);
             currentConnection = connAfterFin;
 
@@ -370,10 +448,8 @@ export const useTcpAnimation = () => {
             }));
 
             await animatePacketMove(
-                NETWORK_POSITIONS.CLIENT.xPercent,
-                NETWORK_POSITIONS.CLOSE_Y_PERCENT,
-                NETWORK_POSITIONS.SERVER.xPercent,
-                NETWORK_POSITIONS.CLOSE_Y_PERCENT,
+                true,  // 从客户端发送
+                NETWORK_POSITIONS.TRACKS.FIN1,
                 'FIN',
                 finPacket,
                 'fin1'
@@ -381,8 +457,11 @@ export const useTcpAnimation = () => {
 
             if (!isMountedRef.current) return;
 
-            // ACK 1
+            // ACK 1 - 服务器确认
             dispatch(setAnimationStatus('步骤 2/4: 服务器发送 ACK'));
+            dispatch(setServerState(TcpConnectionState.CLOSE_WAIT));
+            dispatch(setClientState(TcpConnectionState.FIN_WAIT_2));
+
             const [connAfterAck, ackPacket1] = TcpService.handleFinAndSendAck(
                 { ...currentConnection, state: TcpConnectionState.ESTABLISHED },
                 finPacket
@@ -397,10 +476,8 @@ export const useTcpAnimation = () => {
             }));
 
             await animatePacketMove(
-                NETWORK_POSITIONS.SERVER.xPercent,
-                NETWORK_POSITIONS.CLOSE_Y_PERCENT,
-                NETWORK_POSITIONS.CLIENT.xPercent,
-                NETWORK_POSITIONS.CLOSE_Y_PERCENT,
+                false,  // 从服务端发送
+                NETWORK_POSITIONS.TRACKS.FIN1_ACK,
                 'ACK',
                 ackPacket1,
                 'ack1'
@@ -408,8 +485,10 @@ export const useTcpAnimation = () => {
 
             if (!isMountedRef.current) return;
 
-            // FIN 2
+            // FIN 2 - 服务器发起关闭
             dispatch(setAnimationStatus('步骤 3/4: 服务器发送 FIN'));
+            dispatch(setServerState(TcpConnectionState.LAST_ACK));
+
             const [connAfterServerFin, serverFinPacket] = TcpService.sendFinalFin(connAfterAck);
             currentConnection = { ...currentConnection, state: TcpConnectionState.TIME_WAIT };
 
@@ -421,10 +500,8 @@ export const useTcpAnimation = () => {
             }));
 
             await animatePacketMove(
-                NETWORK_POSITIONS.SERVER.xPercent,
-                NETWORK_POSITIONS.CLOSE_Y_PERCENT,
-                NETWORK_POSITIONS.CLIENT.xPercent,
-                NETWORK_POSITIONS.CLOSE_Y_PERCENT,
+                false,  // 从服务端发送
+                NETWORK_POSITIONS.TRACKS.FIN2,
                 'FIN',
                 serverFinPacket,
                 'fin2'
@@ -432,8 +509,10 @@ export const useTcpAnimation = () => {
 
             if (!isMountedRef.current) return;
 
-            // ACK 2
+            // ACK 2 - 客户端最终确认
             dispatch(setAnimationStatus('步骤 4/4: 客户端发送最终 ACK'));
+            dispatch(setClientState(TcpConnectionState.TIME_WAIT));
+
             const ackPacket2: NetworkPacket = {
                 id: `final_ack_${Date.now()}`,
                 source: `${currentConnection.sourceIp}:${currentConnection.sourcePort}`,
@@ -444,9 +523,9 @@ export const useTcpAnimation = () => {
                     sourcePort: currentConnection.sourcePort,
                     destinationPort: currentConnection.destinationPort,
                     sequenceNumber: currentConnection.localSeqNum,
-                    acknowledgmentNumber: serverFinPacket.tcpHeader!.sequenceNumber + 1,
+                    acknowledgmentNumber: currentConnection.remoteAckNum,
                     headerLength: 5,
-                    flags: 16,
+                    flags: TcpFlags.ACK,
                     windowSize: currentConnection.windowSize,
                     checksum: 0,
                     urgentPointer: 0,
@@ -463,10 +542,8 @@ export const useTcpAnimation = () => {
             }));
 
             await animatePacketMove(
-                NETWORK_POSITIONS.CLIENT.xPercent,
-                NETWORK_POSITIONS.CLOSE_Y_PERCENT,
-                NETWORK_POSITIONS.SERVER.xPercent,
-                NETWORK_POSITIONS.CLOSE_Y_PERCENT,
+                true,  // 从客户端发送
+                NETWORK_POSITIONS.TRACKS.FIN2_ACK,
                 'ACK',
                 ackPacket2,
                 'ack2'
@@ -474,34 +551,63 @@ export const useTcpAnimation = () => {
 
             if (!isMountedRef.current) return;
 
-            const closedConnection: TcpConnection = {
-                ...currentConnection,
-                state: TcpConnectionState.CLOSED,
-            };
+            // 连接关闭
+            dispatch(setServerState(TcpConnectionState.CLOSED));
 
-            dispatch(setConnection(closedConnection));
+            // 等待 2MSL 后客户端也关闭
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            dispatch(setClientState(TcpConnectionState.CLOSED));
+
+            dispatch(setConnection(null));
             dispatch(setAnimationStatus('✅ TCP 四次挥手完成，连接已关闭！'));
-            dispatch(setActiveLayers(['application', 'transport', 'network', 'link']));
+            dispatch(setActiveLayers([]));
 
             timeoutRef.current = setTimeout(() => {
                 if (isMountedRef.current) {
                     dispatch(setAnimationStatus(''));
-                    dispatch(setActiveLayers([]));
                     dispatch(pause());
                 }
             }, ANIMATION_DURATION.CLEANUP_DELAY);
         } catch (error) {
-            console.error('关闭动画失败:', error);
-            dispatch(setAnimationStatus('❌ 动画执行失败'));
-            dispatch(pause());
+            const errorMessage = error instanceof Error ? error.message : '未知错误';
+            dispatch(setError({
+                hasError: true,
+                message: '四次挥手失败',
+                details: errorMessage,
+                phase: 'close'
+            }));
+            dispatch(setAnimationStatus('❌ 四次挥手失败'));
         }
     }, [connection, dispatch, animatePacketMove]);
 
     // 重置连接
     const resetConnection = useCallback(() => {
         cleanupAnimation();
+        dispatch(clearActivePackets());
         dispatch(reset());
     }, [dispatch, cleanupAnimation]);
+
+    // 清除错误
+    const clearErrorState = useCallback(() => {
+        dispatch(clearError());
+    }, [dispatch]);
+
+    // 重试失败的阶段
+    const retryFailedPhase = useCallback(() => {
+        if (!error.phase) return;
+        dispatch(clearError());
+        switch (error.phase) {
+            case 'handshake':
+                performHandshake();
+                break;
+            case 'data':
+                performDataTransfer();
+                break;
+            case 'close':
+                performClose();
+                break;
+        }
+    }, [dispatch, error.phase, performHandshake, performDataTransfer, performClose]);
 
     // 确保组件挂载时 isMountedRef 为 true
     useEffect(() => {
@@ -521,10 +627,13 @@ export const useTcpAnimation = () => {
         selectedPacket,
         currentPhase,
         timelineSteps,
+        error,
         performHandshake,
         performDataTransfer,
         performClose,
         resetConnection,
+        clearErrorState,
+        retryFailedPhase,
         cleanupAnimation,
         updateContainerSize,
         selectPacket,

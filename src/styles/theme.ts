@@ -70,16 +70,16 @@ export const darkTheme = {
     },
   },
 
-  // 节点颜色
+  // 节点颜色 - 深色系，确保文字清晰可见
   nodeColors: {
     client: {
-      from: '#22c55e',
-      to: '#16a34a',
+      from: '#166534',
+      to: '#14532d',
       glow: 'rgba(34, 197, 94, 0.5)',
     },
     server: {
-      from: '#3b82f6',
-      to: '#2563eb',
+      from: '#1e40af',
+      to: '#1e3a8a',
       glow: 'rgba(59, 130, 246, 0.5)',
     },
   },

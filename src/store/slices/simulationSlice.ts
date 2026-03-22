@@ -2,15 +2,30 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { TcpConnection, TcpConnectionState, NetworkPacket } from '@/types/networkTypes';
 import { PacketType } from '@/styles/theme';
 
+// 活动数据包（用于动画显示）
+export interface ActivePacket {
+    id: string;
+    type: PacketType;
+    position: { x: number; y: number };
+    targetPosition: { x: number; y: number };
+    startTime: number;
+    duration: number;
+    seqNum?: number;
+    ackNum?: number;
+    completed: boolean;
+    direction: 'right' | 'left';  // 移动方向
+}
+
 // 动画 UI 状态
 export interface AnimationUIState {
     clientActive: boolean;
     serverActive: boolean;
     connectionLineActive: boolean;
-    packetPosition: { x: number; y: number };
-    currentPacketType: PacketType;
+    activePackets: ActivePacket[];
     activeLayers: string[];
     containerSize: { width: number; height: number };
+    clientState: TcpConnectionState | null;
+    serverState: TcpConnectionState | null;
 }
 
 // 时间线步骤
@@ -30,7 +45,15 @@ export interface PacketHistoryItem {
     phase: 'handshake' | 'data' | 'close';
 }
 
-interface SimulationState {
+// 错误状态
+export interface ErrorState {
+    hasError: boolean;
+    message: string;
+    details?: string;
+    phase?: 'handshake' | 'data' | 'close';
+}
+
+export interface SimulationState {
     isPlaying: boolean;
     connection: TcpConnection | null;
     animationStatus: string;
@@ -39,6 +62,7 @@ interface SimulationState {
     selectedPacket: NetworkPacket | null;
     currentPhase: 'idle' | 'handshake' | 'data' | 'close';
     timelineSteps: TimelineStep[];
+    error: ErrorState;
 }
 
 const handshakeSteps: TimelineStep[] = [
@@ -63,10 +87,11 @@ const initialAnimationUI: AnimationUIState = {
     clientActive: false,
     serverActive: false,
     connectionLineActive: false,
-    packetPosition: { x: 15, y: 50 },
-    currentPacketType: 'SYN' as PacketType,
+    activePackets: [],
     activeLayers: [],
     containerSize: { width: 800, height: 600 },
+    clientState: null,
+    serverState: null,
 };
 
 const initialState: SimulationState = {
@@ -78,6 +103,7 @@ const initialState: SimulationState = {
     selectedPacket: null,
     currentPhase: 'idle',
     timelineSteps: [],
+    error: { hasError: false, message: '' },
 };
 
 export const simulationSlice = createSlice({
@@ -104,11 +130,28 @@ export const simulationSlice = createSlice({
         setAnimationUI: (state, action: PayloadAction<Partial<AnimationUIState>>) => {
             state.animationUI = { ...state.animationUI, ...action.payload };
         },
-        setPacketPosition: (state, action: PayloadAction<{ x: number; y: number }>) => {
-            state.animationUI.packetPosition = action.payload;
+        addActivePacket: (state, action: PayloadAction<ActivePacket>) => {
+            state.animationUI.activePackets.push(action.payload);
         },
-        setPacketType: (state, action: PayloadAction<PacketType>) => {
-            state.animationUI.currentPacketType = action.payload;
+        updateActivePacket: (state, action: PayloadAction<{ id: string; position: { x: number; y: number } }>) => {
+            const packet = state.animationUI.activePackets.find(p => p.id === action.payload.id);
+            if (packet) {
+                packet.position = action.payload.position;
+            }
+        },
+        completeActivePacket: (state, action: PayloadAction<string>) => {
+            const packet = state.animationUI.activePackets.find(p => p.id === action.payload);
+            if (packet) {
+                packet.completed = true;
+            }
+        },
+        removeActivePacket: (state, action: PayloadAction<string>) => {
+            state.animationUI.activePackets = state.animationUI.activePackets.filter(
+                p => p.id !== action.payload
+            );
+        },
+        clearActivePackets: (state) => {
+            state.animationUI.activePackets = [];
         },
         setActiveLayers: (state, action: PayloadAction<string[]>) => {
             state.animationUI.activeLayers = action.payload;
@@ -121,6 +164,12 @@ export const simulationSlice = createSlice({
         },
         setConnectionLineActive: (state, action: PayloadAction<boolean>) => {
             state.animationUI.connectionLineActive = action.payload;
+        },
+        setClientState: (state, action: PayloadAction<TcpConnectionState | null>) => {
+            state.animationUI.clientState = action.payload;
+        },
+        setServerState: (state, action: PayloadAction<TcpConnectionState | null>) => {
+            state.animationUI.serverState = action.payload;
         },
         setContainerSize: (state, action: PayloadAction<{ width: number; height: number }>) => {
             state.animationUI.containerSize = action.payload;
@@ -173,6 +222,14 @@ export const simulationSlice = createSlice({
             state.selectedPacket = null;
             state.currentPhase = 'idle';
             state.timelineSteps = [];
+            state.error = { hasError: false, message: '' };
+        },
+        setError: (state, action: PayloadAction<ErrorState>) => {
+            state.error = action.payload;
+            state.isPlaying = false;
+        },
+        clearError: (state) => {
+            state.error = { hasError: false, message: '' };
         },
     },
 });
@@ -184,12 +241,17 @@ export const {
     updateConnectionState,
     setAnimationStatus,
     setAnimationUI,
-    setPacketPosition,
-    setPacketType,
+    addActivePacket,
+    updateActivePacket,
+    completeActivePacket,
+    removeActivePacket,
+    clearActivePackets,
     setActiveLayers,
     setClientActive,
     setServerActive,
     setConnectionLineActive,
+    setClientState,
+    setServerState,
     setContainerSize,
     addPacketToHistory,
     clearPacketHistory,
@@ -199,6 +261,8 @@ export const {
     updateTimelineStep,
     resetTimeline,
     reset,
+    setError,
+    clearError,
 } = simulationSlice.actions;
 
 export default simulationSlice.reducer;
