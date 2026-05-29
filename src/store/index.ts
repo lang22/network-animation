@@ -3,12 +3,14 @@ import { TypedUseSelectorHook, useDispatch, useSelector } from 'react-redux';
 import simulationReducer from './slices/simulationSlice';
 import protocolReducer from './slices/protocolSlice';
 import networkReducer from './slices/networkSlice';
+import congestionReducer from './slices/congestionSlice';
 
 export const store = configureStore({
   reducer: {
     simulation: simulationReducer,
     protocol: protocolReducer,
     network: networkReducer,
+    congestion: congestionReducer,
   },
 });
 

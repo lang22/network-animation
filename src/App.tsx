@@ -4,6 +4,7 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import Home from '@/containers/Home';
 import Simulation from '@/containers/Simulation';
 import ProtocolDetail from '@/containers/ProtocolDetail';
+import CongestionVisualizer from '@/components/CongestionControl/CongestionVisualizer';
 
 const App: React.FC = () => {
   return (
@@ -12,6 +13,7 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/protocol/tcp" element={<Simulation />} />
+          <Route path="/protocol/congestion" element={<CongestionVisualizer />} />
           <Route path="/protocol/:id" element={<ProtocolDetail />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -161,10 +161,18 @@ const protocols = [
     {
         id: 'tcp',
         name: 'TCP/IP 协议',
-        description: '传输控制协议/互联网协议，提供可靠的、面向连接的数据传输服务',
+        description: '传输控制协议/互联网协议，三次握手、数据传输、四次挥手动画',
         icon: '🔌',
         available: true,
         path: '/protocol/tcp'
+    },
+    {
+        id: 'congestion',
+        name: 'TCP 拥塞控制',
+        description: '慢启动、拥塞避免、快速恢复 — 滑动窗口与飞行小球可视化',
+        icon: '📶',
+        available: true,
+        path: '/protocol/congestion'
     },
     {
         id: 'http',
