@@ -6,7 +6,6 @@ import { darkTheme } from '@/styles/theme';
 import Header from '@/components/Layout/Header';
 import NetworkCanvas from '@/components/Animation/NetworkCanvas';
 import Packet from '@/components/Animation/Packet';
-import ProtocolStackPanel from '@/components/Panels/ProtocolStackPanel';
 import PacketDetailPanel from '@/components/Panels/PacketDetailPanel';
 
 // ==================== 页面容器 ====================
@@ -63,7 +62,7 @@ const PanelContent = styled.div`
 `;
 
 // ==================== 按钮样式 ====================
-const Button = styled.button<{ $variant?: 'primary' | 'secondary' | 'danger' }>`
+const Button = styled.button<{ $variant?: 'primary' | 'secondary' | 'danger' | 'accent' }>`
     width: 100%;
     padding: 12px 16px;
     border-radius: 8px;
@@ -80,6 +79,14 @@ const Button = styled.button<{ $variant?: 'primary' | 'secondary' | 'danger' }>`
                     color: #000;
                     border: none;
                     &:hover:not(:disabled) { opacity: 0.9; }
+                `;
+            case 'accent':
+                return `
+                    background: linear-gradient(90deg, ${darkTheme.colors.primary}, ${darkTheme.colors.secondaryLight});
+                    color: #fff;
+                    border: none;
+                    box-shadow: 0 0 12px ${darkTheme.colors.glow};
+                    &:hover:not(:disabled) { opacity: 0.9; box-shadow: 0 0 18px ${darkTheme.colors.glow}; }
                 `;
             case 'danger':
                 return `
@@ -349,6 +356,7 @@ const TcpProtocolVisualizer: React.FC = () => {
     const {
         connection,
         isPlaying,
+        fullFlowActive,
         animationStatus,
         animationUI,
         packetHistory,
@@ -359,6 +367,7 @@ const TcpProtocolVisualizer: React.FC = () => {
         performHandshake,
         performDataTransfer,
         performClose,
+        performFullFlow,
         resetConnection,
         updateContainerSize,
         selectPacket,
@@ -390,6 +399,7 @@ const TcpProtocolVisualizer: React.FC = () => {
     const handleDataTransfer = useCallback(() => performDataTransfer(), [performDataTransfer]);
     const handleClose = useCallback(() => performClose(), [performClose]);
     const handleReset = useCallback(() => resetConnection(), [resetConnection]);
+    const handleFullFlow = useCallback(() => performFullFlow(), [performFullFlow]);
 
     const getConnectionStatus = (): 'idle' | 'connected' | 'closed' => {
         if (!connection) return 'idle';
@@ -419,27 +429,34 @@ const TcpProtocolVisualizer: React.FC = () => {
                     <PanelContent>
                         <ButtonGroup>
                             <Button
+                                $variant="accent"
+                                onClick={handleFullFlow}
+                                disabled={isPlaying || fullFlowActive}
+                            >
+                                ⚡ 一键演示
+                            </Button>
+                            <Button
                                 $variant="primary"
                                 onClick={handleHandshake}
-                                disabled={isPlaying || !!connection}
+                                disabled={isPlaying || fullFlowActive || !!connection}
                             >
                                 {connection ? '已连接' : '开始握手'}
                             </Button>
                             <Button
                                 $variant="secondary"
                                 onClick={handleDataTransfer}
-                                disabled={isPlaying || !connection || connection.state !== TcpConnectionState.ESTABLISHED}
+                                disabled={isPlaying || fullFlowActive || !connection || connection.state !== TcpConnectionState.ESTABLISHED}
                             >
                                 发送数据
                             </Button>
                             <Button
                                 $variant="danger"
                                 onClick={handleClose}
-                                disabled={isPlaying || !connection || connection.state !== TcpConnectionState.ESTABLISHED}
+                                disabled={isPlaying || fullFlowActive || !connection || connection.state !== TcpConnectionState.ESTABLISHED}
                             >
                                 关闭连接
                             </Button>
-                            <Button onClick={handleReset} disabled={isPlaying}>
+                            <Button onClick={handleReset} disabled={isPlaying || fullFlowActive}>
                                 重置
                             </Button>
                         </ButtonGroup>
@@ -494,6 +511,7 @@ const TcpProtocolVisualizer: React.FC = () => {
                                 </InfoItem>
                             </ConnectionGrid>
                         )}
+
                     </PanelContent>
                 </Panel>
 
@@ -527,37 +545,44 @@ const TcpProtocolVisualizer: React.FC = () => {
                             connectionActive={animationUI.connectionLineActive}
                             clientState={animationUI.clientState}
                             serverState={animationUI.serverState}
+                            clientReceivedPackets={packetHistory.filter(h => h.packet.direction === 'response').map(h => h.packet)}
+                            serverReceivedPackets={packetHistory.filter(h => h.packet.direction === 'request').map(h => h.packet)}
+                            onPacketClick={(packet) => selectPacket(packet)}
+                            selectedPacketId={selectedPacket?.id}
+                            connection={connection}
                         >
-                            {animationUI.activePackets.map((packet) => (
-                                    <Packet
-                                        key={packet.id}
-                                        x={packet.position.x}
-                                        y={packet.position.y}
-                                        type={packet.type}
-                                        moving={!packet.completed}
-                                        direction={packet.direction}
-                                        seqNum={packet.seqNum}
-                                        ackNum={packet.ackNum}
-                                        onClick={() => {
-                                            const historyPacket = packetHistory.find(
-                                                p => p.packet.tcpHeader?.sequenceNumber === packet.seqNum
-                                            );
-                                            if (historyPacket) {
-                                                selectPacket(historyPacket.packet);
-                                            }
-                                        }}
-                                    />
-                                ))}
+                            {animationUI.activePackets.map((packet) => {
+                                    const isSelected = selectedPacket?.id === packet.networkPacketId;
+                                    return (
+                                        <Packet
+                                            key={packet.id}
+                                            x={packet.position.x}
+                                            y={packet.position.y}
+                                            type={packet.type}
+                                            moving={!packet.completed}
+                                            disappearing={packet.completed}
+                                            direction={packet.direction}
+                                            seqNum={packet.seqNum}
+                                            ackNum={packet.ackNum}
+                                            selected={isSelected}
+                                            onClick={() => {
+                                                // 通过 networkPacketId 精确查找历史包
+                                                const historyPacket = packetHistory.find(
+                                                    p => p.packet.id === packet.networkPacketId
+                                                );
+                                                if (historyPacket) {
+                                                    selectPacket(historyPacket.packet);
+                                                }
+                                            }}
+                                        />
+                                    );
+                                })}
                         </NetworkCanvas>
                     </AnimationArea>
                 </AnimationPanel>
 
                 {/* 右侧信息面板 */}
                 <Panel>
-                    <PanelHeader>📡 协议栈</PanelHeader>
-                    <PanelContent style={{ flex: '0 0 auto' }}>
-                        <ProtocolStackPanel activeLayers={animationUI.activeLayers} />
-                    </PanelContent>
                     <PanelHeader>📦 数据包详情</PanelHeader>
                     <PanelContent style={{ flex: '1' }}>
                         <PacketDetailPanel packet={selectedPacket} />

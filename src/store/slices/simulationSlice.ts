@@ -14,6 +14,8 @@ export interface ActivePacket {
     ackNum?: number;
     completed: boolean;
     direction: 'right' | 'left';  // 移动方向
+    /** 关联的 NetworkPacket ID，用于点击时精确查找 */
+    networkPacketId?: string;
 }
 
 // 动画 UI 状态
@@ -55,6 +57,7 @@ export interface ErrorState {
 
 export interface SimulationState {
     isPlaying: boolean;
+    fullFlowActive: boolean;
     connection: TcpConnection | null;
     animationStatus: string;
     animationUI: AnimationUIState;
@@ -96,6 +99,7 @@ const initialAnimationUI: AnimationUIState = {
 
 const initialState: SimulationState = {
     isPlaying: false,
+    fullFlowActive: false,
     connection: null,
     animationStatus: '',
     animationUI: initialAnimationUI,
@@ -213,11 +217,17 @@ export const simulationSlice = createSlice({
         resetTimeline: (state) => {
             state.timelineSteps = state.timelineSteps.map(s => ({ ...s, completed: false, active: false }));
         },
+        setFullFlowActive: (state, action: PayloadAction<boolean>) => {
+            state.fullFlowActive = action.payload;
+        },
         reset: (state) => {
+            // 保留当前容器尺寸，否则 ResizeObserver 未触发时位置计算错误
+            const savedSize = state.animationUI.containerSize;
             state.isPlaying = false;
+            state.fullFlowActive = false;
             state.connection = null;
             state.animationStatus = '';
-            state.animationUI = initialAnimationUI;
+            state.animationUI = { ...initialAnimationUI, containerSize: savedSize };
             state.packetHistory = [];
             state.selectedPacket = null;
             state.currentPhase = 'idle';
@@ -263,6 +273,7 @@ export const {
     reset,
     setError,
     clearError,
+    setFullFlowActive,
 } = simulationSlice.actions;
 
 export default simulationSlice.reducer;

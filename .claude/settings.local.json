@@ -4,7 +4,19 @@
       "Bash(npm test:*)",
       "Bash(npm run:*)",
       "Bash(npm start:*)",
-      "Bash(netstat:*)"
+      "Bash(netstat:*)",
+      "Bash(cd E:/Projects/network-animation && npx tsc --noEmit 2>&1)",
+      "Bash(netstat -ano | findstr :3000)",
+      "Bash(sleep 5 && curl -s http://localhost:3000 | head -20)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/protocol/tcp)",
+      "Bash(sleep 5 && curl -s http://localhost:3000/protocol/tcp | head -20)",
+      "Bash(cd /e/Projects/network-animation && rm -rf node_modules/.cache && npm run build 2>&1)",
+      "Bash(cd /e/Projects/network-animation && rm -rf node_modules/.cache dist && npm run build 2>&1 | tail -10)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git checkout:*)",
+      "Bash(npx webpack *)"
     ]
   }
 }

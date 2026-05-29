@@ -51,10 +51,10 @@ export const darkTheme = {
       text: '#fff',
     },
     ACK: {
-      from: '#22c55e',
-      to: '#4ade80',
-      glow: 'rgba(34, 197, 94, 0.6)',
-      text: '#fff',
+      from: '#f59e0b',
+      to: '#fbbf24',
+      glow: 'rgba(245, 158, 11, 0.6)',
+      text: '#000',
     },
     DATA: {
       from: '#00d4ff',

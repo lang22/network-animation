@@ -31,6 +31,7 @@ describe('simulationSlice', () => {
 
     const initialState: SimulationState = {
         isPlaying: false,
+        fullFlowActive: false,
         connection: null,
         animationStatus: '',
         animationUI: initialAnimationUI,
@@ -197,9 +198,10 @@ describe('simulationSlice', () => {
     });
 
     describe('reset', () => {
-        it('should reset all state to initial', () => {
+        it('should reset all state to initial, preserving containerSize', () => {
             const modifiedState: SimulationState = {
                 isPlaying: true,
+                fullFlowActive: true,
                 connection: {
                     id: 'conn_123',
                     sourceIp: '192.168.1.10',
@@ -221,13 +223,13 @@ describe('simulationSlice', () => {
                     connectionLineActive: true,
                     activePackets: [{
                         id: 'packet_1',
-                        type: 'ACK',
+                        type: 'ACK' as const,
                         position: { x: 100, y: 200 },
                         targetPosition: { x: 300, y: 200 },
                         startTime: Date.now(),
                         duration: 1000,
                         completed: false,
-                        direction: 'right',
+                        direction: 'right' as const,
                     }],
                     activeLayers: ['transport'],
                     containerSize: { width: 1000, height: 800 },
@@ -236,12 +238,16 @@ describe('simulationSlice', () => {
                 },
                 packetHistory: [{ id: 'pkt_1', packet: {} as any, timestamp: Date.now(), phase: 'handshake' }],
                 selectedPacket: {} as any,
-                currentPhase: 'handshake',
+                currentPhase: 'handshake' as const,
                 timelineSteps: [{ id: 'syn', label: 'SYN', completed: true, active: false }],
                 error: { hasError: true, message: '错误' },
             };
             const state = simulationSlice(modifiedState, reset());
-            expect(state).toEqual(initialState);
+            // containerSize should be preserved, everything else reset
+            expect(state).toEqual({
+                ...initialState,
+                animationUI: { ...initialState.animationUI, containerSize: { width: 1000, height: 800 } },
+            });
         });
     });
 

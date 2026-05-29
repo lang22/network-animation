@@ -25,6 +25,7 @@ import {
     updateTimelineStep,
     setError,
     clearError,
+    setFullFlowActive,
     ActivePacket,
 } from '@/store/slices/simulationSlice';
 import { TcpService } from '@/services/protocols/tcpService';
@@ -43,6 +44,7 @@ export const useTcpAnimation = (speed: number = 1) => {
     const {
         connection,
         isPlaying,
+        fullFlowActive,
         animationStatus,
         animationUI,
         packetHistory,
@@ -56,11 +58,16 @@ export const useTcpAnimation = (speed: number = 1) => {
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
     const isMountedRef = useRef<boolean>(true);
     const speedRef = useRef<number>(speed);
+    const connectionRef = useRef(connection);
+    const fullFlowActiveRef = useRef(false);
 
-    // 更新 speed ref
+    // 保持 refs 最新
     useEffect(() => {
         speedRef.current = speed;
     }, [speed]);
+    useEffect(() => {
+        connectionRef.current = connection;
+    }, [connection]);
 
     const containerSize = animationUI.containerSize;
 
@@ -143,8 +150,11 @@ export const useTcpAnimation = (speed: number = 1) => {
                     ackNum: packet.tcpHeader?.acknowledgmentNumber,
                     completed: false,
                     direction: fromClient ? 'right' : 'left',
+                    networkPacketId: packet.id,  // 精确关联 NetworkPacket，点击时直接查找
                 };
                 dispatch(addActivePacket(activePacket));
+                // 自动选中当前飞行的数据包，右侧面板实时展示详情
+                dispatch(setSelectedPacket(packet));
 
                 // 激活发送方节点
                 if (fromClient) {
@@ -338,7 +348,8 @@ export const useTcpAnimation = (speed: number = 1) => {
 
     // 执行数据传输动画
     const performDataTransfer = useCallback(async () => {
-        if (!connection || !isMountedRef.current) return;
+        const conn = connectionRef.current;
+        if (!conn || !isMountedRef.current) return;
 
         dispatch(play());
         dispatch(setCurrentPhase('data'));
@@ -353,7 +364,7 @@ export const useTcpAnimation = (speed: number = 1) => {
 
             // DATA - 客户端发送数据
             dispatch(setAnimationStatus('发送数据包到服务器'));
-            const [updatedConnection, dataPacket] = TcpService.sendData(connection, dataPayload);
+            const [updatedConnection, dataPacket] = TcpService.sendData(conn, dataPayload);
 
             dispatch(addPacketToHistory({
                 id: `data_${Date.now()}`,
@@ -416,11 +427,12 @@ export const useTcpAnimation = (speed: number = 1) => {
             }));
             dispatch(setAnimationStatus('❌ 数据传输失败'));
         }
-    }, [connection, dispatch, animatePacketMove]);
+    }, [dispatch, animatePacketMove]);
 
     // 执行四次挥手动画
     const performClose = useCallback(async () => {
-        if (!connection || !isMountedRef.current) return;
+        const conn = connectionRef.current;
+        if (!conn || !isMountedRef.current) return;
 
         dispatch(play());
         dispatch(setCurrentPhase('close'));
@@ -431,7 +443,7 @@ export const useTcpAnimation = (speed: number = 1) => {
         dispatch(setServerState(TcpConnectionState.ESTABLISHED));
 
         try {
-            let currentConnection = connection;
+            let currentConnection = conn;
 
             // FIN 1 - 客户端发起关闭
             dispatch(setAnimationStatus('步骤 1/4: 客户端发送 FIN'));
@@ -578,7 +590,7 @@ export const useTcpAnimation = (speed: number = 1) => {
             }));
             dispatch(setAnimationStatus('❌ 四次挥手失败'));
         }
-    }, [connection, dispatch, animatePacketMove]);
+    }, [dispatch, animatePacketMove]);
 
     // 重置连接
     const resetConnection = useCallback(() => {
@@ -609,6 +621,34 @@ export const useTcpAnimation = (speed: number = 1) => {
         }
     }, [dispatch, error.phase, performHandshake, performDataTransfer, performClose]);
 
+    // 一键完整演示：握手 → 发数据 → 挥手
+    const performFullFlow = useCallback(async () => {
+        if (fullFlowActive || !isMountedRef.current) return;
+        // 先清空重置，避免残留状态干扰
+        dispatch(clearActivePackets());
+        dispatch(reset());
+        dispatch(setFullFlowActive(true));
+        dispatch(clearError());
+
+        try {
+            // 握手
+            await performHandshake();
+            if (!isMountedRef.current) return;
+            // 等待一下让用户看清连接建立状态
+            await new Promise(resolve => setTimeout(resolve, 800));
+
+            // 发数据
+            await performDataTransfer();
+            if (!isMountedRef.current) return;
+            await new Promise(resolve => setTimeout(resolve, 800));
+
+            // 挥手
+            await performClose();
+        } finally {
+            dispatch(setFullFlowActive(false));
+        }
+    }, [fullFlowActive, performHandshake, performDataTransfer, performClose, dispatch]);
+
     // 确保组件挂载时 isMountedRef 为 true
     useEffect(() => {
         isMountedRef.current = true;
@@ -621,6 +661,7 @@ export const useTcpAnimation = (speed: number = 1) => {
     return {
         connection,
         isPlaying,
+        fullFlowActive,
         animationStatus,
         animationUI,
         packetHistory,
@@ -631,6 +672,7 @@ export const useTcpAnimation = (speed: number = 1) => {
         performHandshake,
         performDataTransfer,
         performClose,
+        performFullFlow,
         resetConnection,
         clearErrorState,
         retryFailedPhase,

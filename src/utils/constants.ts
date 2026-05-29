@@ -3,18 +3,18 @@
 export const NETWORK_POSITIONS = {
     // 不同数据包的轨道Y位置（百分比）
     TRACKS: {
-        // 握手轨道
-        SYN: 15,
-        SYN_ACK: 30,
-        HANDSHAKE_ACK: 45,
-        // 数据传输轨道
-        DATA: 60,
-        DATA_ACK: 75,
-        // 四次挥手轨道
-        FIN1: 15,
-        FIN1_ACK: 30,
-        FIN2: 45,
-        FIN2_ACK: 60,
+        // 握手轨道 — 通道上部
+        SYN: 14,
+        SYN_ACK: 28,
+        HANDSHAKE_ACK: 42,
+        // 数据传输轨道 — 通道中部
+        DATA: 56,
+        DATA_ACK: 70,
+        // 四次挥手轨道 — 通道中下部（避开握手轨道）
+        FIN1: 50,
+        FIN1_ACK: 60,
+        FIN2: 70,
+        FIN2_ACK: 80,
     }
 } as const;
 
@@ -26,7 +26,7 @@ export const ANIMATION_DURATION = {
     PACKET_MOVE: 3000,      // 基准动画时间，1x速度下3秒
     STATE_TRANSITION: 300,
     CLEANUP_DELAY: 1000,
-    PACKET_DISPLAY: 500,    // 数据包完成动画后显示时间
+    PACKET_DISPLAY: 600,    // 数据包到达后停留+消失动画时间
 } as const;
 
 // 默认网络配置
@@ -72,8 +72,8 @@ export const calculateBoundaryLines = (
 };
 
 // 计算数据包位置
-// fromClient: true 表示从客户端发送，数据包左边从 client_x 开始，右边到达 server_x
-// fromClient: false 表示从服务端发送，数据包右边从 server_x 开始，左边到达 client_x
+// fromClient: true 表示从客户端发送，数据包从客户端盒子出发，到达服务端盒子
+// fromClient: false 表示从服务端发送，数据包从服务端盒子出发，到达客户端盒子
 // progress: 0-1 动画进度
 export const calculatePacketPosition = (
     fromClient: boolean,
@@ -82,9 +82,12 @@ export const calculatePacketPosition = (
     containerWidth: number,
     containerHeight: number
 ): { x: number; y: number } => {
-    const { clientX, serverX } = calculateBoundaryLines(containerWidth);
-    const { WIDTH, HEIGHT } = PACKET_SIZE;
-    const { OUTER_PADDING } = CANVAS_LAYOUT;
+    const { WIDTH } = PACKET_SIZE;
+    const { OUTER_PADDING, ENDPOINT_WIDTH } = CANVAS_LAYOUT;
+
+    // 端点盒子的实际边缘（不含gap，数据包应该触碰这些边缘）
+    const clientBoxRight = OUTER_PADDING + ENDPOINT_WIDTH;   // 客户端盒子右边缘
+    const serverBoxLeft = containerWidth - OUTER_PADDING - ENDPOINT_WIDTH; // 服务端盒子左边缘
 
     // 计算通道高度
     const channelHeight = containerHeight - OUTER_PADDING * 2;
@@ -92,22 +95,21 @@ export const calculatePacketPosition = (
     // Y坐标：基于轨道百分比
     const y = OUTER_PADDING + (channelHeight * trackYPercent) / 100;
 
-    // X坐标计算：
-    // 数据包中心位置 = 左边缘 + 宽度/2
+    // X坐标计算：数据包使用中心点定位 (transform: translate(-50%, -50%))
     if (fromClient) {
         // 从客户端发送到服务端
-        // 起始：左边缘在 clientX，中心在 clientX + WIDTH/2
-        // 结束：右边缘在 serverX，中心在 serverX - WIDTH/2
-        const startX = clientX + WIDTH / 2;
-        const endX = serverX - WIDTH / 2;
+        // 起始(progress=0)：左边缘贴合客户端盒子右边缘，中心在 clientBoxRight + WIDTH/2
+        // 结束(progress=1)：右边缘贴合服务端盒子左边缘，中心在 serverBoxLeft - WIDTH/2
+        const startX = clientBoxRight + WIDTH / 2;
+        const endX = serverBoxLeft - WIDTH / 2;
         const x = startX + (endX - startX) * progress;
         return { x, y };
     } else {
         // 从服务端发送到客户端
-        // 起始：右边缘在 serverX，中心在 serverX - WIDTH/2
-        // 结束：左边缘在 clientX，中心在 clientX + WIDTH/2
-        const startX = serverX - WIDTH / 2;
-        const endX = clientX + WIDTH / 2;
+        // 起始(progress=0)：右边缘贴合服务端盒子左边缘，中心在 serverBoxLeft - WIDTH/2
+        // 结束(progress=1)：左边缘贴合客户端盒子右边缘，中心在 clientBoxRight + WIDTH/2
+        const startX = serverBoxLeft - WIDTH / 2;
+        const endX = clientBoxRight + WIDTH / 2;
         const x = startX + (endX - startX) * progress;
         return { x, y };
     }
