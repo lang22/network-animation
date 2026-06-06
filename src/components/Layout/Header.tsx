@@ -51,7 +51,11 @@ const Title = styled.h1`
   }
 `;
 
-const Header: React.FC = () => {
+interface HeaderProps {
+  title?: string;
+}
+
+const Header: React.FC<HeaderProps> = ({ title = 'TCP 协议模拟器' }) => {
   const navigate = useNavigate();
 
   return (
@@ -59,7 +63,7 @@ const Header: React.FC = () => {
       <BackButton onClick={() => navigate('/')}>
         ← 返回
       </BackButton>
-      <Title>TCP 协议模拟器</Title>
+      <Title>{title}</Title>
     </HeaderContainer>
   );
 };

@@ -6,6 +6,7 @@ import {
   FlightBall,
   CwndRecord,
   SenderWindowState,
+  LogEntry,
 } from '@/types/congestionTypes';
 
 const initialState: CongestionState = {
@@ -26,6 +27,8 @@ const initialState: CongestionState = {
   ackedPackets: 0,
   packetLossEnabled: false,
   animationStatus: '',
+  eventLog: [],
+  logSeq: 0,
 };
 
 export const congestionSlice = createSlice({
@@ -79,6 +82,14 @@ export const congestionSlice = createSlice({
     setAnimationStatus: (state, action: PayloadAction<string>) => {
       state.animationStatus = action.payload;
     },
+    addLogEntry: (state, action: PayloadAction<{ text: string; type: LogEntry['type'] }>) => {
+      state.logSeq += 1;
+      state.eventLog.push({ id: state.logSeq, text: action.payload.text, type: action.payload.type });
+      // 保留最近 50 条
+      if (state.eventLog.length > 50) {
+        state.eventLog = state.eventLog.slice(-40);
+      }
+    },
     reset: () => initialState,
   },
 });
@@ -99,6 +110,7 @@ export const {
   incrementAcked,
   setPacketLossEnabled,
   setAnimationStatus,
+  addLogEntry,
   reset,
 } = congestionSlice.actions;
 

@@ -1,13 +1,11 @@
-import { useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef, useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store';
 import {
   setPlaying,
-  setScenario,
   setPhase,
   setWindow,
+  setPacketLossEnabled,
   addFlightBall,
-  updateFlightBall,
-  markBallLost,
   removeFlightBall,
   clearFlightBalls,
   addCwndRecord,
@@ -15,6 +13,7 @@ import {
   incrementLost,
   incrementAcked,
   setAnimationStatus,
+  addLogEntry,
   reset,
 } from '@/store/slices/congestionSlice';
 import {
@@ -27,227 +26,254 @@ import {
 } from '@/services/protocols/congestionService';
 import { CongestionPhase, ScenarioMode, FlightBall } from '@/types/congestionTypes';
 
-const RTT_MS = 2500;       // 模拟RTT
-const FLIGHT_MS = 1200;    // 数据包单程飞行时间（~RTT/2）
-const ACK_MS = 1000;       // ACK回程时间
-const TRACK_GAP = 8;       // 轨道间距(%)
-const BASE_TRACK = 10;     // 起始轨道(%)
+const FLIGHT_MS = 3000;
+const ACK_MS = 2000;
+const TRACK_GAP = 6;
+const BASE_TRACK = 15;
 
 export function useCongestionControl(speed: number = 1) {
   const dispatch = useAppDispatch();
   const state = useAppSelector(s => s.congestion);
   const isMountedRef = useRef(true);
   const speedRef = useRef(speed);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const stateRef = useRef(state);
   const frameRef = useRef<number | null>(null);
 
+  // 本地动画进度 — 每帧批量更新一次，避免 Redux 高频 dispatch
+  const [progressMap, setProgressMap] = useState<Record<string, number>>({});
+
   useEffect(() => { speedRef.current = speed; }, [speed]);
+  useEffect(() => { stateRef.current = state; }, [state]);
 
   const getDur = useCallback((base: number) => base / speedRef.current, []);
 
-  // 发送一批数据包
-  const sendBatch = useCallback(async () => {
-    const w = state.window;
-    const count = w.allowedToSend;
-    if (count <= 0 || !isMountedRef.current) return;
+  // ── 单全局 rAF 循环 ──
+  const pendingCallbacksRef = useRef<Map<string, () => void>>(new Map());
+  const ballMetasRef = useRef<Map<string, { startTime: number; duration: number }>>(new Map());
 
-    const balls: FlightBall[] = [];
-    for (let i = 0; i < count; i++) {
-      const seq = w.nextSeq + i;
-      const trackY = BASE_TRACK + ((seq - 1) % 12) * TRACK_GAP;
-      const ball: FlightBall = {
-        id: `ball_${seq}_${Date.now()}`,
-        progress: 0,
-        trackY,
-        isAck: false,
-        isLost: false,
-        seqNum: seq,
-        startTime: performance.now(),
-        duration: getDur(FLIGHT_MS),
-      };
-      balls.push(ball);
-      dispatch(addFlightBall(ball));
-    }
+  const startGlobalLoop = useCallback(() => {
+    if (frameRef.current) return; // already running
 
-    dispatch(setWindow({ ...w, nextSeq: w.nextSeq + count }));
+    const tick = (_now: number) => {
+      if (!isMountedRef.current) { frameRef.current = null; return; }
+      const now = performance.now();
+      const next: Record<string, number> = {};
+      let hasActive = false;
 
-    // 数据包飞行动画
-    const startTime = performance.now();
-    const duration = getDur(FLIGHT_MS);
-
-    const animate = (now: number) => {
-      if (!isMountedRef.current) return;
-      const elapsed = now - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-
-      balls.forEach(b => {
-        if (!b.isLost) {
-          dispatch(updateFlightBall({ id: b.id, progress }));
+      ballMetasRef.current.forEach((meta, id) => {
+        const elapsed = now - meta.startTime;
+        const progress = Math.min(elapsed / meta.duration, 1);
+        next[id] = progress;
+        if (progress < 1) hasActive = true;
+        else {
+          // 完成：触发回调
+          const cb = pendingCallbacksRef.current.get(id);
+          if (cb) { cb(); pendingCallbacksRef.current.delete(id); }
+          ballMetasRef.current.delete(id);
         }
       });
 
-      if (progress < 1) {
-        frameRef.current = requestAnimationFrame(animate);
+      // 合并而非替换，保持已完成但尚未从Redux移除的球的最后位置
+      setProgressMap(prev => {
+        const merged = { ...prev };
+        for (const [id, p] of Object.entries(next)) {
+          merged[id] = p;
+        }
+        return merged;
+      });
+
+      if (hasActive || ballMetasRef.current.size > 0) {
+        frameRef.current = requestAnimationFrame(tick);
       } else {
-        // 到达后：检查丢包，发送ACK
-        balls.forEach(b => {
-          if (shouldDropPacket(state.packetLossEnabled)) {
-            dispatch(markBallLost(b.id));
+        frameRef.current = null;
+      }
+    };
+    frameRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  const registerBall = useCallback((id: string, startTime: number, duration: number, onComplete: () => void) => {
+    ballMetasRef.current.set(id, { startTime, duration });
+    pendingCallbacksRef.current.set(id, onComplete);
+    // 初始化进度为0，保持已有数据
+    setProgressMap(prev => {
+      prev[id] = 0;
+      return { ...prev };
+    });
+    startGlobalLoop();
+  }, [startGlobalLoop]);
+
+  // ── 发送一批数据包 ──
+  const sendBatch = useCallback((): Promise<void> => {
+    return new Promise((resolve) => {
+      const w = stateRef.current.window;
+      const count = w.allowedToSend;
+      if (count <= 0 || !isMountedRef.current) { resolve(); return; }
+
+      const batchSeq = Date.now();
+      let completedCount = 0;
+      const totalBalls = count;
+      dispatch(addLogEntry({ text: `发送 ${count} 包 (seq ${w.nextSeq}-${w.nextSeq + count - 1})`, type: 'info' }));
+
+      for (let i = 0; i < count; i++) {
+        const seq = w.nextSeq + i;
+        const trackY = BASE_TRACK + ((seq - 1) % 12) * TRACK_GAP;
+        const ball: FlightBall = {
+          id: `ball_${seq}_${batchSeq}`,
+          progress: 0,
+          trackY,
+          isAck: false,
+          isLost: false,
+          seqNum: seq,
+          startTime: performance.now(),
+          duration: getDur(FLIGHT_MS),
+        };
+        dispatch(addFlightBall(ball));
+
+        registerBall(ball.id, performance.now(), getDur(FLIGHT_MS), () => {
+          if (!isMountedRef.current) { completedCount++; checkDone(); return; }
+          const cur = stateRef.current;
+
+          if (shouldDropPacket(cur.packetLossEnabled)) {
             dispatch(incrementLost());
-            // 丢包处理
-            const result = handlePacketLoss(state.window);
+            const result = handlePacketLoss(cur.window);
             dispatch(setWindow(result.window));
             dispatch(setPhase(result.phase));
-            dispatch(setAnimationStatus(`❌ 包 #${b.seqNum} 丢失！cwnd → ${result.window.cwnd}`));
+            dispatch(setAnimationStatus(`❌ 包 #${seq} 丢失！cwnd → ${result.window.cwnd}`));
+            dispatch(addLogEntry({ text: `✕ 包 #${seq} 丢失！cwnd → ${result.window.cwnd}`, type: 'error' }));
+            // 丢包后移除
             setTimeout(() => {
-              if (isMountedRef.current) dispatch(removeFlightBall(b.id));
+              if (isMountedRef.current) dispatch(removeFlightBall(ball.id));
+              completedCount++; checkDone();
             }, 800);
           } else {
-            // 确认包到达
-            const newWindow = acknowledgePacket(state.window, b.seqNum);
+            const newWindow = acknowledgePacket(cur.window, seq);
             dispatch(setWindow(newWindow));
             dispatch(incrementAcked());
+            dispatch(addLogEntry({ text: `● 包 #${seq} 到达，ACK 返回`, type: 'success' }));
 
-            // 发送ACK回程小球
+            // ACK回程
+            const ackId = `ack_${seq}_${Date.now()}`;
             const ackBall: FlightBall = {
-              id: `ack_${b.seqNum}_${Date.now()}`,
+              id: ackId,
               progress: 0,
-              trackY: b.trackY,
+              trackY,
               isAck: true,
               isLost: false,
-              seqNum: b.seqNum,
+              seqNum: seq,
               startTime: performance.now(),
               duration: getDur(ACK_MS),
             };
             dispatch(addFlightBall(ackBall));
 
-            setTimeout(() => {
-              if (isMountedRef.current) dispatch(removeFlightBall(b.id));
-            }, 150);
+            // 移除数据包
+            setTimeout(() => { if (isMountedRef.current) dispatch(removeFlightBall(ball.id)); }, 150);
+
+            registerBall(ackId, performance.now(), getDur(ACK_MS), () => {
+              setTimeout(() => { if (isMountedRef.current) dispatch(removeFlightBall(ackId)); }, 100);
+              completedCount++; checkDone();
+            });
           }
         });
       }
-    };
 
-    frameRef.current = requestAnimationFrame(animate);
-  }, [dispatch, state.window, state.packetLossEnabled, getDur]);
+      dispatch(setWindow({
+        ...w,
+        nextSeq: w.nextSeq + count,
+        allowedToSend: 0,
+      }));
 
-  // 发送ACK回程动画
-  const sendAck = useCallback(async (ackBall: FlightBall) => {
-    const ackStart = performance.now();
-    const ackDuration = ackBall.duration;
+      const checkDone = () => { if (completedCount >= totalBalls) resolve(); };
+    });
+  }, [dispatch, registerBall, getDur]);
 
-    const animateAck = (now: number) => {
-      if (!isMountedRef.current) return;
-      const elapsed = now - ackStart;
-      const progress = Math.min(elapsed / ackDuration, 1);
-      dispatch(updateFlightBall({ id: ackBall.id, progress }));
-
-      if (progress < 1) {
-        frameRef.current = requestAnimationFrame(animateAck);
-      } else {
-        setTimeout(() => {
-          if (isMountedRef.current) dispatch(removeFlightBall(ackBall.id));
-        }, 100);
-      }
-    };
-    frameRef.current = requestAnimationFrame(animateAck);
-  }, [dispatch]);
-
-  // 一个RTT周期
+  // ── RTT 周期 ──
   const runRttCycle = useCallback(async () => {
     if (!isMountedRef.current) return;
+    const cur = stateRef.current;
+
     dispatch(incrementRtt());
-    dispatch(setAnimationStatus(`RTT #${state.rttCount + 1} — cwnd=${state.window.cwnd} — 发送 ${state.window.allowedToSend} 包`));
+    dispatch(addLogEntry({ text: `══ RTT #${cur.rttCount + 1} (cwnd=${cur.window.cwnd}) ══`, type: 'rtt' }));
+    dispatch(setAnimationStatus(`RTT #${cur.rttCount + 1} — cwnd=${cur.window.cwnd} — 发送 ${cur.window.allowedToSend} 包`));
+    dispatch(addCwndRecord({ time: Date.now(), cwnd: cur.window.cwnd, ssthresh: cur.window.ssthresh }));
 
-    // 记录历史
-    dispatch(addCwndRecord({
-      time: Date.now(),
-      cwnd: state.window.cwnd,
-      ssthresh: state.window.ssthresh,
-    }));
-
-    // 发送批量数据包
     await sendBatch();
+    await new Promise(r => setTimeout(r, getDur(300)));
 
-    // 等待 ACK 返回
-    await new Promise(resolve =>
-      setTimeout(resolve, getDur(FLIGHT_MS + 500))
-    );
-
-    // 窗口增长
-    const growth = growWindow(state.window, state.phase);
+    const latest = stateRef.current;
+    const growth = growWindow(latest.window, latest.phase);
     dispatch(setWindow(growth.window));
     dispatch(setPhase(growth.phase));
     dispatch(setAnimationStatus(`cwnd → ${growth.window.cwnd} (${growth.phase === CongestionPhase.SLOW_START ? '慢启动' : '拥塞避免'})`));
+    dispatch(setWindow(prepareNextBatch(growth.window)));
+  }, [dispatch, sendBatch, getDur]);
 
-    // 准备下一批
-    const ready = prepareNextBatch(growth.window);
-    dispatch(setWindow(ready));
-  }, [dispatch, state.window, state.phase, state.rttCount, sendBatch, getDur]);
-
-  // 完整演示
+  // ── 完整演示 ──
   const performFullDemo = useCallback(async () => {
+    if (stateRef.current.isPlaying) return;
     dispatch(reset());
+    ballMetasRef.current.clear();
+    pendingCallbacksRef.current.clear();
+    setProgressMap({});
+    await new Promise(r => setTimeout(r, 50));
     dispatch(setPlaying(true));
-    dispatch(setScenario(ScenarioMode.FULL_DEMO));
     dispatch(setPhase(CongestionPhase.SLOW_START));
 
-    const maxRtt = 12;
-    for (let i = 0; i < maxRtt; i++) {
+    for (let i = 0; i < 12; i++) {
       if (!isMountedRef.current) break;
       await runRttCycle();
-      await new Promise(resolve => setTimeout(resolve, getDur(600)));
+      await new Promise(r => setTimeout(r, getDur(800)));
     }
-
     dispatch(setAnimationStatus('✅ 拥塞控制演示完成'));
     dispatch(setPlaying(false));
   }, [dispatch, runRttCycle, getDur]);
 
-  // 仅慢启动场景
   const performSlowStart = useCallback(async () => {
+    if (stateRef.current.isPlaying) return;
     dispatch(reset());
+    ballMetasRef.current.clear();
+    pendingCallbacksRef.current.clear();
+    setProgressMap({});
+    await new Promise(r => setTimeout(r, 50));
     dispatch(setPlaying(true));
-    dispatch(setScenario(ScenarioMode.SLOW_START));
     dispatch(setPhase(CongestionPhase.SLOW_START));
-
-    // 设一个低的ssthresh让慢启动阶段短一些
     dispatch(setWindow({ ...createWindow(), ssthresh: 16 }));
 
     for (let i = 0; i < 8; i++) {
       if (!isMountedRef.current) break;
       await runRttCycle();
-      await new Promise(resolve => setTimeout(resolve, getDur(500)));
+      await new Promise(r => setTimeout(r, getDur(700)));
     }
-
     dispatch(setAnimationStatus('✅ 慢启动演示完成'));
     dispatch(setPlaying(false));
   }, [dispatch, runRttCycle, getDur]);
 
   const resetAll = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
     if (frameRef.current) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    ballMetasRef.current.clear();
+    pendingCallbacksRef.current.clear();
+    setProgressMap({});
     dispatch(clearFlightBalls());
     dispatch(reset());
   }, [dispatch]);
 
   const togglePacketLoss = useCallback(() => {
-    dispatch(setAnimationStatus(
-      !state.packetLossEnabled ? '🔴 丢包模拟开启' : '丢包模拟关闭'
-    ));
-  }, [dispatch, state.packetLossEnabled]);
+    const newVal = !stateRef.current.packetLossEnabled;
+    dispatch(setPacketLossEnabled(newVal));
+    dispatch(setAnimationStatus(newVal ? '🔴 丢包模拟开启 — 5%丢包率' : '丢包模拟关闭'));
+  }, [dispatch]);
 
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      if (timerRef.current) clearTimeout(timerRef.current);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
     };
   }, []);
 
   return {
     ...state,
+    progressMap,
     performFullDemo,
     performSlowStart,
     resetAll,

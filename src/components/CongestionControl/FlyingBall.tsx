@@ -1,6 +1,5 @@
 import React from 'react';
 import styled, { keyframes } from 'styled-components';
-import { darkTheme } from '@/styles/theme';
 
 const ballAppear = keyframes`
   0%   { transform: translate(-50%, -50%) scale(0); opacity: 0; }
@@ -8,71 +7,108 @@ const ballAppear = keyframes`
   100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
 `;
 
-const BallWrapper = styled.div<{ $x: number; $y: number; $color: string; $isAck: boolean }>`
+// 数据包球体 — GPU加速，纯色无光晕，白色粗字
+const BallWrapper = styled.div<{ $x: number; $y: number }>`
   position: absolute;
-  left: ${({ $x }) => $x}px;
-  top: ${({ $y }) => $y}px;
+  left: ${({ $x }) => $x}px; top: ${({ $y }) => $y}px;
   transform: translate(-50%, -50%);
-  width: ${({ $isAck }) => $isAck ? '8px' : '16px'};
-  height: ${({ $isAck }) => $isAck ? '8px' : '16px'};
+  width: 44px; height: 44px;
   border-radius: 50%;
-  background: radial-gradient(circle at 40% 40%, rgba(255,255,255,0.8), ${({ $color }) => $color});
-  box-shadow:
-    0 0 8px ${({ $color }) => $color},
-    0 0 16px ${({ $color }) => $color}88;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b 50%, #d97706);
+  border: 2px solid rgba(255,255,255,0.35);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
   z-index: 20;
   pointer-events: none;
-  animation: ${ballAppear} 0.25s ease-out;
+  will-change: left, top;
+  display: flex; align-items: center; justify-content: center;
 
-  /* 拖尾 */
   &::after {
     content: '';
     position: absolute;
     top: 50%;
-    ${({ $isAck }) => $isAck ? 'right: calc(100% + 2px);' : 'left: calc(100% + 2px);'}
+    left: calc(100% - 2px);
     transform: translateY(-50%);
-    width: 30px;
-    height: 2px;
+    width: 40px; height: 2px;
+    background: linear-gradient(to right, rgba(245,158,11,0.4), transparent);
     border-radius: 1px;
-    background: linear-gradient(
-      ${({ $isAck }) => $isAck ? 'to left' : 'to right'},
-      ${({ $color }) => $color}cc,
-      transparent
-    );
-    opacity: 0.6;
   }
 `;
 
-const LostBall = styled(BallWrapper)`
-  background: radial-gradient(circle at 40% 40%, #fff, ${darkTheme.colors.error});
-  box-shadow: 0 0 12px ${darkTheme.colors.error};
-  &::after { display: none; }
+// ACK 回程球体
+const AckBall = styled.div<{ $x: number; $y: number }>`
+  position: absolute;
+  left: ${({ $x }) => $x}px; top: ${({ $y }) => $y}px;
+  transform: translate(-50%, -50%);
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #a78bfa, #7c3aed 50%, #6d28d9);
+  border: 2px solid rgba(255,255,255,0.35);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  z-index: 21;
+  pointer-events: none;
+  will-change: left, top;
+  display: flex; align-items: center; justify-content: center;
+
+  &::after {
+    content: '✓';
+    color: white; font-size: 14px; font-weight: 900;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  }
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: calc(100% - 2px);
+    transform: translateY(-50%);
+    width: 30px; height: 2px;
+    background: linear-gradient(to left, rgba(124,58,237,0.4), transparent);
+    border-radius: 1px;
+  }
+`;
+
+const SeqLabel = styled.span`
+  font-size: 11px; font-weight: 900;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  pointer-events: none;
+  font-family: 'JetBrains Mono', monospace;
+  z-index: 1;
+  line-height: 1;
+`;
+
+const LostBall = styled.div<{ $x: number; $y: number }>`
+  position: absolute;
+  left: ${({ $x }) => $x}px; top: ${({ $y }) => $y}px;
+  transform: translate(-50%, -50%);
+  width: 44px; height: 44px; border-radius: 50%;
+  background: linear-gradient(135deg, #f87171, #ef4444 50%, #dc2626);
+  border: 2px solid rgba(255,255,255,0.35);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  z-index: 22;
+  pointer-events: none;
+  animation: ${ballAppear} 0.3s ease-out;
+  display: flex; align-items: center; justify-content: center;
+  &::after { content: '✕'; color: white; font-size: 20px; font-weight: 900; text-shadow: 0 1px 2px rgba(0,0,0,0.4); }
 `;
 
 interface FlyingBallProps {
-  x: number;
-  y: number;
+  x: number; y: number;
   isAck: boolean;
   isLost?: boolean;
+  seqNum?: number;
 }
 
-const COLORS = ['#38bdf8', '#00d4ff', '#60a5fa', '#818cf8', '#22d3ee', '#93c5fd'];
+const FlyingBall: React.FC<FlyingBallProps> = React.memo(({ x, y, isAck, isLost, seqNum }) => {
+  if (isLost) return <LostBall $x={x} $y={y} />;
 
-const FlyingBall: React.FC<FlyingBallProps> = ({ x, y, isAck, isLost }) => {
-  const color = COLORS[Math.abs(x * 7 + y * 13) % COLORS.length];
-
-  if (isLost) {
-    return <LostBall $x={x} $y={y} $color={darkTheme.colors.error} $isAck={false} />;
-  }
+  if (isAck) return <AckBall $x={x} $y={y} />;
 
   return (
-    <BallWrapper
-      $x={x}
-      $y={y}
-      $color={isAck ? darkTheme.colors.success : color}
-      $isAck={isAck}
-    />
+    <BallWrapper $x={x} $y={y}>
+      {seqNum !== undefined && <SeqLabel>#{seqNum}</SeqLabel>}
+    </BallWrapper>
   );
-};
+});
 
 export default FlyingBall;

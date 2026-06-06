@@ -63,6 +63,12 @@ export interface CongestionUIState {
   containerSize: { width: number; height: number };
 }
 
+export interface LogEntry {
+  id: number;
+  text: string;
+  type: 'info' | 'success' | 'error' | 'rtt';
+}
+
 export interface CongestionState {
   isPlaying: boolean;
   scenario: ScenarioMode;
@@ -75,4 +81,6 @@ export interface CongestionState {
   ackedPackets: number;
   packetLossEnabled: boolean;
   animationStatus: string;
+  eventLog: LogEntry[];
+  logSeq: number;
 }
