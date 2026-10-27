@@ -14,7 +14,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
   <Provider store={store}>{children}</Provider>
 );
 
-const renderControl = () => renderHook(() => useCongestionControl(3), { wrapper });
+const renderControl = (speed = 3) => renderHook(() => useCongestionControl(speed), { wrapper });
 
 const congestion = () => store.getState().congestion;
 
@@ -85,6 +85,39 @@ describe('useCongestionControl 丢包与重传', () => {
     expect(state.timeoutCount).toBeGreaterThanOrEqual(3);
     expect(state.retransmissionCount).toBeGreaterThanOrEqual(2);
     expect(state.eventLog.some(e => e.text.includes('放弃重传'))).toBe(true);
+
+    act(() => { result.current.resetAll(); });
+    await act(async () => { await demo; });
+  });
+
+  it('同一轮内多个包超时，拥塞窗口只降一次', async () => {
+    const { result } = renderControl(10);
+
+    let demo: Promise<void> | undefined;
+    act(() => { demo = result.current.performSlowStart(); });
+
+    // 先在没有丢包的情况下把 cwnd 长起来
+    await advance(2500, 20);
+    const cwndBefore = congestion().window.cwnd;
+    expect(cwndBefore).toBeGreaterThanOrEqual(4);
+
+    act(() => {
+      store.dispatch(setPacketLossEnabled(true));
+      store.dispatch(setLossRate(1));
+    });
+
+    // 等到本轮多个包都超时
+    let waited = 0;
+    while (waited < 6000 && congestion().timeoutCount < 2) {
+      await act(async () => { jest.advanceTimersByTime(20); });
+      waited += 20;
+    }
+
+    expect(congestion().timeoutCount).toBeGreaterThanOrEqual(2);
+    expect(congestion().window.cwnd).toBe(1);
+    // 只按一次拥塞事件折半：以本轮峰值 cwnd 为基准减半，而不是按丢包个数连续减半
+    const peakCwnd = Math.max(...congestion().cwndHistory.map(record => record.cwnd));
+    expect(congestion().window.ssthresh).toBe(Math.max(Math.floor(peakCwnd / 2), 2));
 
     act(() => { result.current.resetAll(); });
     await act(async () => { await demo; });

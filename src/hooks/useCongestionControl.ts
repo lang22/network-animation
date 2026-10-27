@@ -62,6 +62,8 @@ export function useCongestionControl(speed: number = 1) {
   const runTokenRef = useRef(0);
   /** 挂在当前批次上的取消钩子（等待中的 sleep / 飞行），终止时逐个 settle，避免 Promise 悬挂 */
   const abortHandlersRef = useRef<Set<() => void>>(new Set());
+  /** 本轮 RTT 是否已经因超时降过窗口：一次拥塞事件只降一次 */
+  const windowReducedThisRttRef = useRef(false);
 
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
@@ -308,12 +310,26 @@ export function useCongestionControl(speed: number = 1) {
     if (!isActive(token)) return;
 
     dispatch(incrementTimeout());
-    const timeoutResult = handleTimeoutLoss(stateRef.current.window);
-    dispatch(setWindow(timeoutResult.window));
-    dispatch(setPhase(timeoutResult.phase));
-    dispatch(setAnimationStatus(`#${seqNum} RTO 超时，cwnd 降为 1`));
-    dispatch(addLogEntry({ text: `#${seqNum} RTO 超时，窗口降为 1，进入慢启动`, type: 'timeout' }));
     dispatch(removeFlightBall(id));
+
+    // 同一轮里多包丢失属于同一次拥塞事件，窗口只降一次
+    if (!windowReducedThisRttRef.current) {
+      windowReducedThisRttRef.current = true;
+      const timeoutResult = handleTimeoutLoss(stateRef.current.window);
+      dispatch(setWindow(timeoutResult.window));
+      dispatch(setPhase(timeoutResult.phase));
+      dispatch(setAnimationStatus(`#${seqNum} RTO 超时，cwnd 降为 1`));
+      dispatch(addLogEntry({
+        text: `#${seqNum} RTO 超时：cwnd 降为 1、ssthresh 减半，进入慢启动`,
+        type: 'timeout',
+      }));
+    } else {
+      dispatch(setAnimationStatus(`#${seqNum} RTO 超时`));
+      dispatch(addLogEntry({
+        text: `#${seqNum} 同样超时：本轮拥塞窗口已降过，不重复减半`,
+        type: 'timeout',
+      }));
+    }
 
     const latest = stateRef.current;
     if (!canRetransmit(attempt, latest.rtoConfig.maxRetransmissions)) {
@@ -364,6 +380,7 @@ export function useCongestionControl(speed: number = 1) {
   const runRttCycle = useCallback(async (token: number) => {
     if (!isActive(token)) return;
 
+    windowReducedThisRttRef.current = false;
     const current = stateRef.current;
     const timeoutCountBefore = current.timeoutCount;
 
