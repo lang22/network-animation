@@ -73,10 +73,7 @@ src/
 │   │   ├── NetworkCanvas.tsx       # 画布容器（三列布局 + 连接线 + 状态条 + 轨道标签）
 │   │   └── Packet.tsx              # 数据包组件（出现/消失动画 + 拖尾 + 发光选中）
 │   ├── Panels/
-│   │   ├── PacketDetailPanel.tsx   # 数据包详情（概要/地址/IP/TCP/以太网/载荷）
-│   │   ├── ProtocolStackPanel.tsx  # 协议栈面板（已废弃，不再使用）
-│   │   ├── TcpStateDiagram.tsx     # TCP 状态机图组件（已不用于主面板）
-│   │   └── TimelinePanel.tsx       # 时间线面板
+│   │   └── PacketDetailPanel.tsx   # 数据包详情（概要/地址/IP/TCP/以太网/载荷）
 │   ├── Layout/Header.tsx           # 顶部导航栏
 │   └── ErrorBoundary.tsx           # 错误边界
 ├── hooks/
@@ -142,6 +139,7 @@ src/
 
 1. **ESLint 可用** — 补 `.eslintrc.json` 与 `@typescript-eslint` 依赖，`npm run lint` 从报错变为 0 error
 2. **覆盖率门槛可执行** — 改为只对 `services/protocols` 与 `store/slices` 设门槛，`npm run test:coverage` 通过
+3. **清理死代码** — 删除无人引用的 `SenderWindow`、`ProtocolStackPanel`、`TcpStateDiagram`、`TimelinePanel`（需要时从 git 历史取回）
 
 ## 最近修改 (2026-05-30)
 
@@ -203,7 +201,6 @@ src/
 | 画布组件 | `src/components/Animation/NetworkCanvas.tsx` |
 | 数据包组件 | `src/components/Animation/Packet.tsx` |
 | 详情面板 | `src/components/Panels/PacketDetailPanel.tsx` |
-| 状态机图 | `src/components/Panels/TcpStateDiagram.tsx` |
 | TCP服务 | `src/services/protocols/tcpService.ts` |
 | 主题样式 | `src/styles/theme.ts` |
 | 类型定义 | `src/types/networkTypes.ts` |
