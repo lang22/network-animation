@@ -188,7 +188,7 @@ const CongestionVisualizer: React.FC = () => {
               }}
               disabled={ctrl.isPlaying}
             >
-              丢下一个包 #${ctrl.window.nextSeq}
+              丢下一个包 #{ctrl.window.nextSeq}
             </MiniBtn>
             <div style={{ fontSize: 10, color: darkTheme.colors.textMuted }}>速度</div>
             <div style={{ display: 'flex', gap: 4 }}>

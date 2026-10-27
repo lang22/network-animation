@@ -140,6 +140,8 @@ src/
 1. **ESLint 可用** — 补 `.eslintrc.json` 与 `@typescript-eslint` 依赖，`npm run lint` 从报错变为 0 error
 2. **覆盖率门槛可执行** — 改为只对 `services/protocols` 与 `store/slices` 设门槛，`npm run test:coverage` 通过
 3. **清理死代码** — 删除无人引用的 `SenderWindow`、`ProtocolStackPanel`、`TcpStateDiagram`、`TimelinePanel`（需要时从 git 历史取回）
+4. **组件冒烟测试** — 新增拥塞控制页面渲染测试（中文文案 + 丢包控制写状态），`setupTests` 补 `ResizeObserver`/`scrollIntoView` 桩
+5. **依赖升级** — `react-router-dom` 升到 6.30.6，消除运行时路由告警
 
 ## 最近修改 (2026-05-30)
 
@@ -220,7 +222,7 @@ src/
 npm install          # 安装依赖
 npm run dev          # 开发服务器 http://localhost:3000
 npm run build        # 生产构建
-npm test             # 运行测试 (45 tests)
+npm test             # 运行测试 (47 tests)
 npm run lint         # ESLint 检查
 npm run test:coverage # 覆盖率（逻辑层门槛）
 ```
