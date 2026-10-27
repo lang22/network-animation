@@ -1,5 +1,5 @@
 // TCP 拥塞控制算法服务
-import { CongestionPhase, SenderWindowState } from '@/types/congestionTypes';
+import { CongestionPhase, LossDecisionConfig, SenderWindowState } from '@/types/congestionTypes';
 
 const INITIAL_CWND = 1;      // MSS
 const INITIAL_SSTHRESH = 64; // MSS
@@ -73,6 +73,27 @@ export function handlePacketLoss(window: SenderWindowState): {
   };
 }
 
+export function handleTimeoutLoss(window: SenderWindowState): {
+  window: SenderWindowState;
+  phase: CongestionPhase;
+} {
+  const newSsthresh = Math.max(Math.floor(window.cwnd / 2), 2);
+
+  return {
+    window: {
+      ...window,
+      cwnd: INITIAL_CWND,
+      ssthresh: newSsthresh,
+      allowedToSend: INITIAL_CWND,
+    },
+    phase: CongestionPhase.SLOW_START,
+  };
+}
+
+export function canRetransmit(attempt: number, maxRetransmissions: number): boolean {
+  return attempt < maxRetransmissions;
+}
+
 /** 确认包到达后更新窗口 */
 export function acknowledgePacket(window: SenderWindowState, ackSeq: number): SenderWindowState {
   return {
@@ -91,9 +112,19 @@ export function prepareNextBatch(window: SenderWindowState): SenderWindowState {
 }
 
 /** 检查是否应该丢包（5%概率） */
-export function shouldDropPacket(packetLossEnabled: boolean): boolean {
-  if (!packetLossEnabled) return false;
-  return Math.random() < 0.05;
+export function shouldDropPacket(
+  config: LossDecisionConfig | boolean,
+  seqNum?: number,
+  randomValue: number = Math.random()
+): boolean {
+  if (typeof config === 'boolean') {
+    if (!config) return false;
+    return randomValue < 0.05;
+  }
+
+  if (!config.enabled) return false;
+  if (config.dropNextSeq !== null && config.dropNextSeq === seqNum) return true;
+  return randomValue < config.lossRate;
 }
 
 export { INITIAL_CWND, INITIAL_SSTHRESH, MAX_CWND };

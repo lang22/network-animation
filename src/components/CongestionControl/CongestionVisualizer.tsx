@@ -68,6 +68,23 @@ const SpeedBtn = styled.button<{ $a?: boolean }>`
   background: ${({ $a }) => $a ? darkTheme.colors.primary : 'transparent'};
   color: ${({ $a }) => $a ? '#000' : darkTheme.colors.textMuted}; font-size: 11px; cursor: pointer;
 `;
+const CompactGrid = styled.div`
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;
+`;
+const MiniBtn = styled.button<{ $a?: boolean }>`
+  padding: 6px; border-radius: 5px; cursor: pointer;
+  border: 1px solid ${({ $a }) => $a ? darkTheme.colors.primary : darkTheme.colors.border};
+  background: ${({ $a }) => $a ? darkTheme.colors.primary : 'transparent'};
+  color: ${({ $a }) => $a ? '#000' : darkTheme.colors.textMuted};
+  font-size: 10px; font-weight: 600;
+  &:disabled { opacity: 0.4; cursor: not-allowed; }
+`;
+const NumberInput = styled.input`
+  width: 100%; box-sizing: border-box; padding: 8px 10px;
+  border-radius: 6px; border: 1px solid ${darkTheme.colors.border};
+  background: rgba(0,0,0,0.25); color: ${darkTheme.colors.text};
+  font-size: 11px;
+`;
 const Status = styled.div`
   padding: 10px; background: rgba(0,212,255,0.08);
   border-left: 3px solid ${darkTheme.colors.primary};
@@ -103,6 +120,8 @@ const LogLine = styled.div<{ $type: string }>`
   color: ${({ $type }) =>
     $type === 'rtt' ? darkTheme.colors.primary :
     $type === 'error' ? darkTheme.colors.error :
+    $type === 'timeout' ? darkTheme.colors.warning :
+    $type === 'retransmit' ? darkTheme.colors.primaryLight :
     $type === 'success' ? darkTheme.colors.success :
     darkTheme.colors.textMuted};
   opacity: 0.85;
@@ -138,6 +157,39 @@ const CongestionVisualizer: React.FC = () => {
             <Btn $v="accent" onClick={ctrl.performFullDemo} disabled={ctrl.isPlaying}>⚡ 完整演示</Btn>
             <Btn $v="primary" onClick={ctrl.performSlowStart} disabled={ctrl.isPlaying}>慢启动</Btn>
             <ToggleRow>丢包模拟 <Toggle $on={ctrl.packetLossEnabled} onClick={ctrl.togglePacketLoss} /></ToggleRow>
+            <div style={{ fontSize: 10, color: darkTheme.colors.textMuted }}>丢包率</div>
+            <CompactGrid>
+              {[0, 0.05, 0.1, 0.2].map(rate => (
+                <MiniBtn
+                  key={rate}
+                  $a={ctrl.lossRate === rate}
+                  onClick={() => ctrl.setLossRate(rate)}
+                  disabled={ctrl.isPlaying}
+                >
+                  {Math.round(rate * 100)}%
+                </MiniBtn>
+              ))}
+            </CompactGrid>
+            <div style={{ fontSize: 10, color: darkTheme.colors.textMuted }}>指定丢包序号</div>
+            <NumberInput
+              type="number"
+              min={1}
+              value={ctrl.dropNextSeq ?? ''}
+              disabled={ctrl.isPlaying}
+              onChange={event => {
+                const value = Number(event.target.value);
+                ctrl.setDropNextSeq(Number.isFinite(value) && value > 0 ? value : null);
+              }}
+            />
+            <MiniBtn
+              onClick={() => {
+                if (!ctrl.packetLossEnabled) ctrl.togglePacketLoss();
+                ctrl.setDropNextSeq(ctrl.window.nextSeq);
+              }}
+              disabled={ctrl.isPlaying}
+            >
+              丢下一个包 #${ctrl.window.nextSeq}
+            </MiniBtn>
             <div style={{ fontSize: 10, color: darkTheme.colors.textMuted }}>速度</div>
             <div style={{ display: 'flex', gap: 4 }}>
               {[0.5, 1, 2, 3].map(s => <SpeedBtn key={s} $a={speed === s} onClick={() => setSpeed(s)}>{s}x</SpeedBtn>)}
@@ -184,6 +236,9 @@ const CongestionVisualizer: React.FC = () => {
                 return <WinSlot key={i} $s={s} $w={slotW} />;
               })}
             </WindowGrid>
+
+            <StatRow>RTO 超时 <span style={{ color: darkTheme.colors.warning }}>{ctrl.timeoutCount}</span></StatRow>
+            <StatRow>重传次数 <span>{ctrl.retransmissionCount}</span></StatRow>
 
             <CwndChart history={ctrl.cwndHistory} />
 

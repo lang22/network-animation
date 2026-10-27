@@ -186,7 +186,17 @@ const AnimationCanvas: React.FC<AnimationCanvasProps> = React.memo(({
 
         {flightBalls.map(ball => {
           const { x, y } = getBallPos(ball);
-          return <FlyingBall key={ball.id} x={x} y={y} isAck={ball.isAck} isLost={ball.isLost} seqNum={ball.seqNum} />;
+          return (
+            <FlyingBall
+              key={ball.id}
+              x={x}
+              y={y}
+              isAck={ball.isAck}
+              isLost={ball.isLost}
+              isRetransmission={ball.isRetransmission}
+              seqNum={ball.seqNum}
+            />
+          );
         })}
       </Canvas>
     </CanvasPanel>

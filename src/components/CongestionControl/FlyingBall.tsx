@@ -8,15 +8,19 @@ const ballAppear = keyframes`
 `;
 
 // 数据包球体 — GPU加速，纯色无光晕，白色粗字
-const BallWrapper = styled.div<{ $x: number; $y: number }>`
+const BallWrapper = styled.div<{ $x: number; $y: number; $retransmission?: boolean }>`
   position: absolute;
   left: ${({ $x }) => $x}px; top: ${({ $y }) => $y}px;
   transform: translate(-50%, -50%);
   width: 44px; height: 44px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #fbbf24, #f59e0b 50%, #d97706);
+  background: ${({ $retransmission }) => $retransmission
+    ? 'linear-gradient(135deg, #38bdf8, #0ea5e9 50%, #0369a1)'
+    : 'linear-gradient(135deg, #fbbf24, #f59e0b 50%, #d97706)'};
   border: 2px solid rgba(255,255,255,0.35);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  box-shadow: ${({ $retransmission }) => $retransmission
+    ? '0 0 12px rgba(56,189,248,0.45), 0 2px 6px rgba(0,0,0,0.35)'
+    : '0 2px 6px rgba(0,0,0,0.35)'};
   z-index: 20;
   pointer-events: none;
   will-change: left, top;
@@ -29,7 +33,9 @@ const BallWrapper = styled.div<{ $x: number; $y: number }>`
     left: calc(100% - 2px);
     transform: translateY(-50%);
     width: 40px; height: 2px;
-    background: linear-gradient(to right, rgba(245,158,11,0.4), transparent);
+    background: ${({ $retransmission }) => $retransmission
+      ? 'linear-gradient(to right, rgba(56,189,248,0.45), transparent)'
+      : 'linear-gradient(to right, rgba(245,158,11,0.4), transparent)'};
     border-radius: 1px;
   }
 `;
@@ -96,17 +102,18 @@ interface FlyingBallProps {
   x: number; y: number;
   isAck: boolean;
   isLost?: boolean;
+  isRetransmission?: boolean;
   seqNum?: number;
 }
 
-const FlyingBall: React.FC<FlyingBallProps> = React.memo(({ x, y, isAck, isLost, seqNum }) => {
+const FlyingBall: React.FC<FlyingBallProps> = React.memo(({ x, y, isAck, isLost, isRetransmission, seqNum }) => {
   if (isLost) return <LostBall $x={x} $y={y} />;
 
   if (isAck) return <AckBall $x={x} $y={y} />;
 
   return (
-    <BallWrapper $x={x} $y={y}>
-      {seqNum !== undefined && <SeqLabel>#{seqNum}</SeqLabel>}
+    <BallWrapper $x={x} $y={y} $retransmission={isRetransmission}>
+      {seqNum !== undefined && <SeqLabel>{isRetransmission ? `RTX ${seqNum}` : `#${seqNum}`}</SeqLabel>}
     </BallWrapper>
   );
 });

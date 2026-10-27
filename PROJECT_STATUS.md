@@ -1,7 +1,7 @@
 # Network Protocol Animation 项目进展
 
 > 本文档为 AI 助手提供上下文，用于快速恢复开发工作。
-> 最后更新：2026-05-30
+> 最后更新：2026-10-28
 
 ## 项目概述
 
@@ -27,6 +27,16 @@
 6. **通道状态条** - 通道底部实时展示双方 TCP 状态和转换
 7. **数据包详情面板** - 右侧面板展示完整 TCP/IP 头部、载荷等信息
 8. **端点接收列表** - 客户端/服务端盒子中垂直展示已接收的数据包
+
+### TCP 拥塞控制模拟器 (`/protocol/congestion`)
+
+1. **滑动窗口动画** — 按 cwnd 连续发送数据包，接收端回 ACK
+2. **慢启动 / 拥塞避免** — cwnd 指数增长到 ssthresh 后改为线性增长
+3. **RTO 超时重传** — 丢包在链路中途判定，等 RTO 超时后 cwnd 降为 1、ssthresh 减半，再重传
+4. **重传同样可能丢** — 每次重传重新参与丢包判定，累计 3 次失败后放弃该包
+5. **丢包控制** — 丢包率 0/5/10/20% 可选，或指定下一个包强制丢弃（演示用）
+6. **实时统计** — RTO 超时次数、重传次数、丢包数、acked 数、cwnd 曲线、事件日志
+7. **演示可终止** — 演示任务带批次号，点「终止」会连带取消正在等待的 RTO 与动画
 
 ### 动画系统
 
@@ -117,6 +127,21 @@ src/
   80    │  挥手          │  ACK2
 ```
 
+## 最近修改 (2026-10-28)
+
+### 拥塞控制丢包重传
+
+1. **丢包判定提前到链路中途** — 发送时即决定该包是否丢失，小球飞到链路 55% 处变红停住，不再"飞到接收端才消失"
+2. **RTO 从发送时刻起算** — 超时等待扣除小球飞行时间，符合真实 RTO 语义
+3. **重传可再丢** — 每次重传重新参与丢包判定，`maxRetransmissions=3` 的重试上限真正生效
+4. **演示可取消** — 引入批次号 + 取消钩子，`终止` 会 settle 所有等待中的 Promise，修复演示循环悬挂/泄漏
+5. **文案统一中文** — 丢包率、指定丢包序号、RTO 超时、重传次数、事件日志全部中文化
+
+### 工程化
+
+1. **ESLint 可用** — 补 `.eslintrc.json` 与 `@typescript-eslint` 依赖，`npm run lint` 从报错变为 0 error
+2. **覆盖率门槛可执行** — 改为只对 `services/protocols` 与 `store/slices` 设门槛，`npm run test:coverage` 通过
+
 ## 最近修改 (2026-05-30)
 
 ### 界面优化
@@ -151,8 +176,8 @@ src/
 
 ### 高优先级
 
-1. **丢包 + 超时重传** — 模拟网络不可靠性，展示 TCP 可靠性机制
-2. **拥塞控制可视化** — 慢启动/拥塞避免，窗口动态变化
+1. **快重传 + 快恢复** — 三次重复 ACK 触发，不走 RTO（拥塞控制模块已预留 `FAST_RECOVERY` 阶段）
+2. **多包同时丢的窗口处理** — 目前每个丢失包各触发一次 `handleTimeoutLoss`，同批多丢会连续减半 ssthresh
 
 ### 中优先级
 
@@ -184,6 +209,13 @@ src/
 | 类型定义 | `src/types/networkTypes.ts` |
 | 测试 | `src/store/slices/__tests__/simulationSlice.test.ts` |
 | 测试 | `src/services/protocols/__tests__/tcpService.test.ts` |
+| 拥塞控制页面 | `src/components/CongestionControl/CongestionVisualizer.tsx` |
+| 拥塞控制动画 | `src/hooks/useCongestionControl.ts` |
+| 拥塞控制状态 | `src/store/slices/congestionSlice.ts` |
+| 拥塞算法 | `src/services/protocols/congestionService.ts` |
+| 拥塞控制测试 | `src/services/protocols/__tests__/congestionService.test.ts` |
+| 拥塞控制测试 | `src/store/slices/__tests__/congestionSlice.test.ts` |
+| 丢包/重传/终止测试 | `src/hooks/__tests__/useCongestionControl.test.tsx` |
 
 ## 快速启动
 
@@ -191,5 +223,7 @@ src/
 npm install          # 安装依赖
 npm run dev          # 开发服务器 http://localhost:3000
 npm run build        # 生产构建
-npm test             # 运行测试 (32 tests)
+npm test             # 运行测试 (44 tests)
+npm run lint         # ESLint 检查
+npm run test:coverage # 覆盖率（逻辑层门槛）
 ```

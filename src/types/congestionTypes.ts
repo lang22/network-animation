@@ -32,6 +32,31 @@ export interface FlightBall {
   startTime: number;
   /** 飞行时长 ms */
   duration: number;
+  attempt?: number;
+  isRetransmission?: boolean;
+}
+
+export type PacketLifecycleStatus =
+  | 'created'
+  | 'flying'
+  | 'lost'
+  | 'waiting_timeout'
+  | 'retransmitting'
+  | 'acked';
+
+export interface InFlightPacket {
+  seqNum: number;
+  ballId: string;
+  sentAt: number;
+  rtoAt: number;
+  attempt: number;
+  status: PacketLifecycleStatus;
+}
+
+export interface RetransmissionItem {
+  seqNum: number;
+  attempt: number;
+  originalBallId: string;
 }
 
 /** 发送窗口状态 */
@@ -66,7 +91,18 @@ export interface CongestionUIState {
 export interface LogEntry {
   id: number;
   text: string;
-  type: 'info' | 'success' | 'error' | 'rtt';
+  type: 'info' | 'success' | 'error' | 'rtt' | 'timeout' | 'retransmit';
+}
+
+export interface RtoConfig {
+  baseMs: number;
+  maxRetransmissions: number;
+}
+
+export interface LossDecisionConfig {
+  enabled: boolean;
+  lossRate: number;
+  dropNextSeq: number | null;
 }
 
 export interface CongestionState {
@@ -80,6 +116,13 @@ export interface CongestionState {
   lostPackets: number;
   ackedPackets: number;
   packetLossEnabled: boolean;
+  inFlightPackets: InFlightPacket[];
+  retransmissionQueue: RetransmissionItem[];
+  rtoConfig: RtoConfig;
+  lossRate: number;
+  dropNextSeq: number | null;
+  timeoutCount: number;
+  retransmissionCount: number;
   animationStatus: string;
   eventLog: LogEntry[];
   logSeq: number;

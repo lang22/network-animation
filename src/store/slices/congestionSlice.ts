@@ -7,6 +7,8 @@ import {
   CwndRecord,
   SenderWindowState,
   LogEntry,
+  InFlightPacket,
+  RetransmissionItem,
 } from '@/types/congestionTypes';
 
 const initialState: CongestionState = {
@@ -26,6 +28,16 @@ const initialState: CongestionState = {
   lostPackets: 0,
   ackedPackets: 0,
   packetLossEnabled: false,
+  inFlightPackets: [],
+  retransmissionQueue: [],
+  rtoConfig: {
+    baseMs: 4200,
+    maxRetransmissions: 3,
+  },
+  lossRate: 0.05,
+  dropNextSeq: null,
+  timeoutCount: 0,
+  retransmissionCount: 0,
   animationStatus: '',
   eventLog: [],
   logSeq: 0,
@@ -64,6 +76,29 @@ export const congestionSlice = createSlice({
     clearFlightBalls: (state) => {
       state.flightBalls = [];
     },
+    trackPacketSent: (state, action: PayloadAction<InFlightPacket>) => {
+      state.inFlightPackets = state.inFlightPackets.filter(p => p.seqNum !== action.payload.seqNum);
+      state.inFlightPackets.push(action.payload);
+    },
+    markTrackedPacketLost: (state, action: PayloadAction<number>) => {
+      const packet = state.inFlightPackets.find(p => p.seqNum === action.payload);
+      if (packet) packet.status = 'lost';
+    },
+    markPacketWaitingTimeout: (state, action: PayloadAction<number>) => {
+      const packet = state.inFlightPackets.find(p => p.seqNum === action.payload);
+      if (packet) packet.status = 'waiting_timeout';
+    },
+    markPacketAcked: (state, action: PayloadAction<number>) => {
+      state.inFlightPackets = state.inFlightPackets.filter(p => p.seqNum !== action.payload);
+      state.ackedPackets += 1;
+    },
+    enqueueRetransmission: (state, action: PayloadAction<RetransmissionItem>) => {
+      state.retransmissionQueue = state.retransmissionQueue.filter(item => item.seqNum !== action.payload.seqNum);
+      state.retransmissionQueue.push(action.payload);
+    },
+    dequeueRetransmission: (state, action: PayloadAction<number>) => {
+      state.retransmissionQueue = state.retransmissionQueue.filter(item => item.seqNum !== action.payload);
+    },
     addCwndRecord: (state, action: PayloadAction<CwndRecord>) => {
       state.cwndHistory.push(action.payload);
     },
@@ -78,6 +113,18 @@ export const congestionSlice = createSlice({
     },
     setPacketLossEnabled: (state, action: PayloadAction<boolean>) => {
       state.packetLossEnabled = action.payload;
+    },
+    setLossRate: (state, action: PayloadAction<number>) => {
+      state.lossRate = Math.max(0, Math.min(1, action.payload));
+    },
+    setDropNextSeq: (state, action: PayloadAction<number | null>) => {
+      state.dropNextSeq = action.payload;
+    },
+    incrementTimeout: (state) => {
+      state.timeoutCount += 1;
+    },
+    incrementRetransmission: (state) => {
+      state.retransmissionCount += 1;
     },
     setAnimationStatus: (state, action: PayloadAction<string>) => {
       state.animationStatus = action.payload;
@@ -104,11 +151,21 @@ export const {
   markBallLost,
   removeFlightBall,
   clearFlightBalls,
+  trackPacketSent,
+  markTrackedPacketLost,
+  markPacketWaitingTimeout,
+  markPacketAcked,
+  enqueueRetransmission,
+  dequeueRetransmission,
   addCwndRecord,
   incrementRtt,
   incrementLost,
   incrementAcked,
   setPacketLossEnabled,
+  setLossRate,
+  setDropNextSeq,
+  incrementTimeout,
+  incrementRetransmission,
   setAnimationStatus,
   addLogEntry,
   reset,
