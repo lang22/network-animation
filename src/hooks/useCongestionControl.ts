@@ -285,23 +285,20 @@ export function useCongestionControl(speed: number = 1) {
     }
 
     // ── 重复 ACK：同一个缺口累计到 3 个就触发快重传 ──
+    // 计数只增不减：3 个之后仍会继续计数（真实 TCP 也数），但只在前 3 个时打日志，
+    // 否则重复 ACK 成批到达时会把 "1/3、2/3、3/3" 重复打好几遍。
     const count = (duplicateAckCountRef.current.get(ackSeq) ?? 0) + 1;
     duplicateAckCountRef.current.set(ackSeq, count);
     dispatch(incrementDuplicateAck());
-    dispatch(setAnimationStatus(`重复 ACK ${ackSeq}（${count}/3）`));
-    dispatch(addLogEntry({ text: `重复 ACK ${ackSeq}（${count}/3）`, type: 'dup_ack' }));
+
+    if (count <= 3) {
+      dispatch(setAnimationStatus(`重复 ACK ${ackSeq}（${count}/3）`));
+      dispatch(addLogEntry({ text: `重复 ACK ${ackSeq}（${count}/3）`, type: 'dup_ack' }));
+    }
 
     if (count === 3) {
       const wake = fastRetransmitWaitersRef.current.get(ackSeq);
-      if (wake) {
-        duplicateAckCountRef.current.delete(ackSeq);
-        wake();
-      } else {
-        dispatch(addLogEntry({
-          text: `#${ackSeq} 已累计 3 个重复 ACK，但它不在 RTO 等待中`,
-          type: 'info',
-        }));
-      }
+      if (wake) wake();
     }
   }, [dispatch, isActive, startFlight, getDur]);
 
