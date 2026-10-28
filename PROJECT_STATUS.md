@@ -125,13 +125,27 @@ src/
   80    │  挥手          │  ACK2
 ```
 
+## 最近修改 (2026-10-29)
+
+### 布局与演示节奏
+
+1. **日志不再滚走整页** — 事件日志改成容器内 `scrollTop`；原来的 `scrollIntoView` 会把整个页面向右下滚，三栏布局被切掉
+2. **画布不再被撑高** — `Main`/`Panel` 补 `min-height: 0`：右侧统计变高时面板内部滚动，画布稳定在 820px，不会长到 995px 把小球裁掉
+3. **轨道按批次均分** — 新增 `laneY(i, count)`：单包走中线，多包按数量自动压缩间距，不再受固定 12 条轨道限制；演示 `ssthresh` 收到 12（最多 16 个球）
+4. **演示节奏** — 飞行 3.0s→2.4s、ACK 2.0s→1.4s、完整演示 12→9 轮、轮间隔 800→500ms
+5. **stateRef 时序** — 演示参数改为在 `sleep` 之前 dispatch：`stateRef` 要等一次渲染才更新，否则第一轮读到旧窗口，ssthresh 会被覆盖回 64
+
+### 可视化验收
+
+- 新增 `scripts/verify-ui.mjs` 与 `npm run verify:ui`：用本机 Edge/Chrome（playwright-core 驱动，不下载额外浏览器）打开页面截图，检查页面无滚动、画布不越界、飞行小球不出画布、指定丢包能触发快重传且不走 RTO；截图输出到 `artifacts/ui/`（已 gitignore）
+
 ## 最近修改 (2026-10-28)
 
 ### 快重传与快恢复
 
 1. **接收端 ACK 模型** — 接收端记录期望序号：按序到达回累计 ACK，乱序到达回重复 ACK（琥珀色 ↺ 小球）
 2. **3 个重复 ACK 触发快重传** — 不等 RTO，立即补发缺失包，cwnd/ssthresh 减半后进入快速恢复
-3. **RTO 调到 8s** — 必须明显长于一个 RTT（飞行 3s + ACK 2s），否则重复 ACK 还没回来就超时了
+3. **RTO 调到 8s** — 必须明显长于一个 RTT（飞行 2.4s + ACK 1.4s = 3.8s），否则重复 ACK 还没回来就超时了
 4. **统计与日志** — 新增重复 ACK / 快重传计数，日志用颜色区分 dup_ack 与 fast_retransmit
 
 ### 拥塞控制丢包重传
@@ -233,4 +247,5 @@ npm run build        # 生产构建
 npm test             # 运行测试 (50 tests)
 npm run lint         # ESLint 检查
 npm run test:coverage # 覆盖率（逻辑层门槛）
+npm run verify:ui    # 需要先 npm start：截图验收布局与快重传
 ```

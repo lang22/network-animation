@@ -49,6 +49,16 @@ npm run build
 npm test
 ```
 
+### 界面验收（可选）
+
+需要先启动 `npm start`，再用本机 Edge/Chrome 截图检查布局与交互：
+
+```bash
+npm run verify:ui
+```
+
+截图输出在 `artifacts/ui/`。
+
 ## 📁 项目结构
 
 ```

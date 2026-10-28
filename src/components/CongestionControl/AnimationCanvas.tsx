@@ -156,7 +156,7 @@ const AnimationCanvas: React.FC<AnimationCanvasProps> = React.memo(({
   const thermTh = Math.min((ssthresh / maxCwnd) * 100, 100);
 
   return (
-    <CanvasPanel ref={canvasRef}>
+    <CanvasPanel ref={canvasRef} data-testid="congestion-canvas">
       <Canvas>
         <PhaseBadge $phase={phase}>{phaseLabel(phase)}</PhaseBadge>
         <RttIndicator>RTT #{rttCount}</RttIndicator>
@@ -205,3 +205,5 @@ const AnimationCanvas: React.FC<AnimationCanvasProps> = React.memo(({
 });
 
 export default AnimationCanvas;
+
+

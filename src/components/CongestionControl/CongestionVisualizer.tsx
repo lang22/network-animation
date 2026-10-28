@@ -15,11 +15,13 @@ const Page = styled.div`
 const Main = styled.div`
   display: grid; grid-template-columns: 220px 1fr 280px;
   gap: 16px; padding: 16px; height: 100%; box-sizing: border-box;
+  /* 不加 min-height:0，面板内容变高会把整行撑破，画布随之超出视口 */
+  min-height: 0; overflow: hidden;
 `;
 const Panel = styled.div`
   background: ${darkTheme.colors.surface}; border-radius: 12px;
   border: 1px solid ${darkTheme.colors.border};
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column; overflow: hidden; min-height: 0;
 `;
 const PanelH = styled.div`
   padding: 14px 16px; border-bottom: 1px solid ${darkTheme.colors.border};
@@ -138,11 +140,15 @@ const phaseLabel = (p: string) => {
 
 // ==================== 主组件 ====================
 const CongestionVisualizer: React.FC = () => {
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const logAreaRef = useRef<HTMLDivElement>(null);
   const [speed, setSpeed] = useState(1);
   const ctrl = useCongestionControl(speed);
 
-  useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [ctrl.eventLog.length]);
+  // 只滚动日志容器本身；scrollIntoView 会把整个页面一起滚走
+  useEffect(() => {
+    const area = logAreaRef.current;
+    if (area) area.scrollTop = area.scrollHeight;
+  }, [ctrl.eventLog.length]);
 
   const inFlight = ctrl.flightBalls.filter(b => !b.isAck && !b.isLost).length;
   const displaySlots = Math.max(ctrl.window.cwnd, 8);
@@ -247,9 +253,8 @@ const CongestionVisualizer: React.FC = () => {
             <CwndChart history={ctrl.cwndHistory} />
 
             <div style={{ fontSize: 10, color: darkTheme.colors.textMuted }}>📋 事件日志</div>
-            <LogArea>
+            <LogArea ref={logAreaRef}>
               {ctrl.eventLog.map(e => <LogLine key={e.id} $type={e.type}>{e.text}</LogLine>)}
-              <div ref={logEndRef} />
             </LogArea>
           </PanelC>
         </Panel>

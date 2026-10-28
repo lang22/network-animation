@@ -40,13 +40,28 @@ import {
 } from '@/services/protocols/congestionService';
 import { CongestionPhase, FlightBall } from '@/types/congestionTypes';
 
-const FLIGHT_MS = 3000;
-const ACK_MS = 2000;
-const TRACK_GAP = 6;
-const BASE_TRACK = 15;
+const FLIGHT_MS = 2400;
+const ACK_MS = 1400;
+/** 一批包在通道上铺开的范围（百分比）与最大轨道间距 */
+const TRACK_CENTER = 50;
+const TRACK_RANGE = 70;
+const MAX_LANE_GAP = 6;
+/** 演示用的慢启动阈值：窗口最多长到 16 个包，保证画布上的小球还看得清 */
+const DEMO_SSTHRESH = 12;
 
 /** 丢包判定发生的位置（0~1，相对链路长度），小球会停在这里变红并消散 */
 const LOSS_PROGRESS = 0.55;
+
+/**
+ * 把一批包均匀铺在通道上：单包走中线，多包按包数自动压缩间距，避免 cwnd 变大后轨道重叠。
+ * 返回通道 Y 百分比。
+ */
+function laneY(index: number, count: number): number {
+  if (count <= 1) return TRACK_CENTER;
+  const gap = Math.min(MAX_LANE_GAP, TRACK_RANGE / (count - 1));
+  const span = (count - 1) * gap;
+  return TRACK_CENTER - span / 2 + index * gap;
+}
 
 /** 一次飞行动画的结束方式 */
 type FlightResult = 'arrived' | 'frozen' | 'aborted';
@@ -491,8 +506,7 @@ export function useCongestionControl(speed: number = 1) {
     const tasks: Promise<void>[] = [];
     for (let i = 0; i < count; i++) {
       const seqNum = windowState.nextSeq + i;
-      const trackY = BASE_TRACK + ((seqNum - 1) % 12) * TRACK_GAP;
-      tasks.push(transmit(seqNum, trackY, 1, token));
+      tasks.push(transmit(seqNum, laneY(i, count), 1, token));
     }
 
     dispatch(setWindow({
@@ -526,7 +540,7 @@ export function useCongestionControl(speed: number = 1) {
     }));
 
     await sendBatch(token);
-    await sleep(getDur(300), token);
+    await sleep(getDur(200), token);
     if (!isActive(token)) return;
 
     const latest = stateRef.current;
@@ -567,6 +581,9 @@ export function useCongestionControl(speed: number = 1) {
     cancelRun();
     dispatch(reset());
     restoreLossControls(controls);
+    // 演示把 ssthresh 收在 12，窗口最多长到 16 个包，画布上还能看清单个球。
+    // 必须在等待前 dispatch：stateRef 要等一次渲染才更新，演示第一轮会读到旧窗口。
+    dispatch(setWindow({ ...createWindow(), ssthresh: DEMO_SSTHRESH }));
 
     const token = runTokenRef.current;
     await sleep(50, token);
@@ -575,10 +592,10 @@ export function useCongestionControl(speed: number = 1) {
     dispatch(setPlaying(true));
     dispatch(setPhase(CongestionPhase.SLOW_START));
 
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 9; i++) {
       if (!isActive(token)) return;
       await runRttCycle(token);
-      await sleep(getDur(800), token);
+      await sleep(getDur(500), token);
     }
 
     if (!isActive(token)) return;
@@ -598,6 +615,8 @@ export function useCongestionControl(speed: number = 1) {
     cancelRun();
     dispatch(reset());
     restoreLossControls(controls);
+    // 同上：dispatch 后要等一次渲染，stateRef 才会带上演示用的窗口参数
+    dispatch(setWindow({ ...createWindow(), ssthresh: DEMO_SSTHRESH }));
 
     const token = runTokenRef.current;
     await sleep(50, token);
@@ -605,12 +624,11 @@ export function useCongestionControl(speed: number = 1) {
 
     dispatch(setPlaying(true));
     dispatch(setPhase(CongestionPhase.SLOW_START));
-    dispatch(setWindow({ ...createWindow(), ssthresh: 16 }));
 
     for (let i = 0; i < 8; i++) {
       if (!isActive(token)) return;
       await runRttCycle(token);
-      await sleep(getDur(700), token);
+      await sleep(getDur(450), token);
     }
 
     if (!isActive(token)) return;

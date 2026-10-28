@@ -30,6 +30,9 @@ npm-debug.log*
 # Test coverage
 coverage/
 
+# UI 验收截图
+artifacts/
+
 # Temporary files
 *.tmp
 *.temp
