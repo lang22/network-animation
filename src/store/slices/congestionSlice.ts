@@ -31,13 +31,16 @@ const initialState: CongestionState = {
   inFlightPackets: [],
   retransmissionQueue: [],
   rtoConfig: {
-    baseMs: 4200,
+    // 必须明显长于一个 RTT（飞行 3s + ACK 2s），否则重复 ACK 还没回来就 RTO 了
+    baseMs: 8000,
     maxRetransmissions: 3,
   },
   lossRate: 0.05,
   dropNextSeq: null,
   timeoutCount: 0,
   retransmissionCount: 0,
+  duplicateAcks: 0,
+  fastRetransmits: 0,
   animationStatus: '',
   eventLog: [],
   logSeq: 0,
@@ -126,6 +129,12 @@ export const congestionSlice = createSlice({
     incrementRetransmission: (state) => {
       state.retransmissionCount += 1;
     },
+    incrementDuplicateAck: (state) => {
+      state.duplicateAcks += 1;
+    },
+    incrementFastRetransmit: (state) => {
+      state.fastRetransmits += 1;
+    },
     setAnimationStatus: (state, action: PayloadAction<string>) => {
       state.animationStatus = action.payload;
     },
@@ -166,6 +175,8 @@ export const {
   setDropNextSeq,
   incrementTimeout,
   incrementRetransmission,
+  incrementDuplicateAck,
+  incrementFastRetransmit,
   setAnimationStatus,
   addLogEntry,
   reset,

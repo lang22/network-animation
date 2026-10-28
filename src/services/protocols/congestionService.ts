@@ -94,6 +94,27 @@ export function canRetransmit(attempt: number, maxRetransmissions: number): bool
   return attempt < maxRetransmissions;
 }
 
+/**
+ * 快重传/快恢复：收到 3 个重复 ACK 判定单个包丢失。
+ * 窗口减半后进入快速恢复（简化实现：cwnd = ssthresh，不再 +3）。
+ */
+export function handleFastRetransmit(window: SenderWindowState): {
+  window: SenderWindowState;
+  phase: CongestionPhase;
+} {
+  const newSsthresh = Math.max(Math.floor(window.cwnd / 2), 2);
+
+  return {
+    window: {
+      ...window,
+      cwnd: newSsthresh,
+      ssthresh: newSsthresh,
+      allowedToSend: newSsthresh,
+    },
+    phase: CongestionPhase.FAST_RECOVERY,
+  };
+}
+
 /** 确认包到达后更新窗口 */
 export function acknowledgePacket(window: SenderWindowState, ackSeq: number): SenderWindowState {
   return {

@@ -194,6 +194,7 @@ const AnimationCanvas: React.FC<AnimationCanvasProps> = React.memo(({
               isAck={ball.isAck}
               isLost={ball.isLost}
               isRetransmission={ball.isRetransmission}
+              isDuplicateAck={ball.isDuplicateAck}
               seqNum={ball.seqNum}
             />
           );

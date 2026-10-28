@@ -1,5 +1,6 @@
 import {
   handleTimeoutLoss,
+  handleFastRetransmit,
   shouldDropPacket,
   canRetransmit,
 } from '../congestionService';
@@ -52,6 +53,22 @@ describe('congestionService retransmission helpers', () => {
       lossRate: 1,
       dropNextSeq: 1,
     }, 1, 0)).toBe(false);
+  });
+
+  it('halves the window and enters fast recovery on 3 duplicate ACKs', () => {
+    const result = handleFastRetransmit(makeWindow(10));
+
+    expect(result.window.cwnd).toBe(5);
+    expect(result.window.ssthresh).toBe(5);
+    expect(result.window.allowedToSend).toBe(5);
+    expect(result.phase).toBe(CongestionPhase.FAST_RECOVERY);
+  });
+
+  it('never reduces fast-recovery window below 2', () => {
+    const result = handleFastRetransmit(makeWindow(2));
+
+    expect(result.window.cwnd).toBe(2);
+    expect(result.window.ssthresh).toBe(2);
   });
 
   it('allows attempts below max retransmissions', () => {

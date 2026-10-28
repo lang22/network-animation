@@ -78,7 +78,7 @@ describe('useCongestionControl 丢包与重传', () => {
     let demo: Promise<void> | undefined;
     act(() => { demo = result.current.performSlowStart(); });
 
-    await advance(8000);
+    await advance(12000);
 
     const state = congestion();
     expect(state.lostPackets).toBeGreaterThanOrEqual(3);
@@ -118,6 +118,43 @@ describe('useCongestionControl 丢包与重传', () => {
     // 只按一次拥塞事件折半：以本轮峰值 cwnd 为基准减半，而不是按丢包个数连续减半
     const peakCwnd = Math.max(...congestion().cwndHistory.map(record => record.cwnd));
     expect(congestion().window.ssthresh).toBe(Math.max(Math.floor(peakCwnd / 2), 2));
+
+    act(() => { result.current.resetAll(); });
+    await act(async () => { await demo; });
+  });
+
+  it('连续 3 个重复 ACK 触发快重传，不用等 RTO', async () => {
+    const { result } = renderControl(10);
+
+    let demo: Promise<void> | undefined;
+    act(() => { demo = result.current.performSlowStart(); });
+
+    // 先把 cwnd 长起来，丢一个包后才有足够多的后续包产生重复 ACK
+    await advance(2500, 20);
+    expect(congestion().window.cwnd).toBeGreaterThanOrEqual(4);
+
+    act(() => {
+      store.dispatch(setPacketLossEnabled(true));
+      store.dispatch(setLossRate(0));
+      store.dispatch(setDropNextSeq(congestion().window.nextSeq));
+    });
+
+    let waited = 0;
+    while (waited < 4000 && congestion().fastRetransmits < 1) {
+      await act(async () => { jest.advanceTimersByTime(20); });
+      waited += 20;
+    }
+
+    const state = congestion();
+    expect(state.fastRetransmits).toBe(1);
+    expect(state.duplicateAcks).toBeGreaterThanOrEqual(3);
+    expect(state.timeoutCount).toBe(0);
+    expect(state.retransmissionCount).toBeGreaterThanOrEqual(1);
+    // 窗口按峰值折半进入快速恢复
+    const peakCwnd = Math.max(...state.cwndHistory.map(record => record.cwnd));
+    expect(state.window.ssthresh).toBe(Math.max(Math.floor(peakCwnd / 2), 2));
+    expect(state.window.cwnd).toBeLessThanOrEqual(state.window.ssthresh);
+    expect(state.eventLog.some(e => e.text.includes('快重传'))).toBe(true);
 
     act(() => { result.current.resetAll(); });
     await act(async () => { await demo; });

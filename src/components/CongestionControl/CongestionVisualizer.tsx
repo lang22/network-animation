@@ -122,6 +122,8 @@ const LogLine = styled.div<{ $type: string }>`
     $type === 'error' ? darkTheme.colors.error :
     $type === 'timeout' ? darkTheme.colors.warning :
     $type === 'retransmit' ? darkTheme.colors.primaryLight :
+    $type === 'dup_ack' ? darkTheme.colors.warning :
+    $type === 'fast_retransmit' ? darkTheme.colors.secondaryLight :
     $type === 'success' ? darkTheme.colors.success :
     darkTheme.colors.textMuted};
   opacity: 0.85;
@@ -237,6 +239,8 @@ const CongestionVisualizer: React.FC = () => {
               })}
             </WindowGrid>
 
+            <StatRow>重复 ACK <span style={{ color: darkTheme.colors.warning }}>{ctrl.duplicateAcks}</span></StatRow>
+            <StatRow>快重传 <span style={{ color: darkTheme.colors.secondaryLight }}>{ctrl.fastRetransmits}</span></StatRow>
             <StatRow>RTO 超时 <span style={{ color: darkTheme.colors.warning }}>{ctrl.timeoutCount}</span></StatRow>
             <StatRow>重传次数 <span>{ctrl.retransmissionCount}</span></StatRow>
 

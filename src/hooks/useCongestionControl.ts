@@ -22,6 +22,8 @@ import {
   setDropNextSeq,
   incrementTimeout,
   incrementRetransmission,
+  incrementDuplicateAck,
+  incrementFastRetransmit,
   setAnimationStatus,
   addLogEntry,
   reset,
@@ -30,6 +32,7 @@ import {
   createWindow,
   growWindow,
   handleTimeoutLoss,
+  handleFastRetransmit,
   acknowledgePacket,
   prepareNextBatch,
   shouldDropPacket,
@@ -64,6 +67,15 @@ export function useCongestionControl(speed: number = 1) {
   const abortHandlersRef = useRef<Set<() => void>>(new Set());
   /** 本轮 RTT 是否已经因超时降过窗口：一次拥塞事件只降一次 */
   const windowReducedThisRttRef = useRef(false);
+  /** 接收端状态：期望的下一个序号，以及已经收到的乱序包 */
+  const receiverRef = useRef<{ expectedSeq: number; received: Set<number> }>({
+    expectedSeq: 1,
+    received: new Set<number>(),
+  });
+  /** 同一个缺失序号上累计的重复 ACK 个数 */
+  const duplicateAckCountRef = useRef<Map<number, number>>(new Map());
+  /** 正在等待 RTO 的丢包：seq -> 唤醒函数（快重传用） */
+  const fastRetransmitWaitersRef = useRef<Map<number, () => void>>(new Map());
 
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
@@ -181,11 +193,14 @@ export function useCongestionControl(speed: number = 1) {
     }
     ballMetasRef.current.clear();
     pendingCallbacksRef.current.clear();
+    receiverRef.current = { expectedSeq: 1, received: new Set<number>() };
+    duplicateAckCountRef.current.clear();
+    fastRetransmitWaitersRef.current.clear();
     if (resetProgress) setProgressMap({});
   }, []);
 
-  // ── ACK 回程 ──
-  const sendAck = useCallback(async (
+  // ── 包到达接收端：回 ACK / 重复 ACK ──
+  const deliverPacket = useCallback(async (
     seqNum: number,
     trackY: number,
     sourceBallId: string,
@@ -194,21 +209,40 @@ export function useCongestionControl(speed: number = 1) {
   ) => {
     if (!isActive(token)) return;
 
-    dispatch(setWindow(acknowledgePacket(stateRef.current.window, seqNum)));
-    dispatch(addLogEntry({
-      text: `${retransmitted ? '重传包' : '数据包'} #${seqNum} 到达接收端，回送 ACK`,
-      type: 'success',
-    }));
-    dispatch(setAnimationStatus(`#${seqNum} 已到达，ACK 返回中`));
+    const receiver = receiverRef.current;
+    const wasExpected = seqNum === receiver.expectedSeq;
+    receiver.received.add(seqNum);
+    while (receiver.received.has(receiver.expectedSeq)) {
+      receiver.received.delete(receiver.expectedSeq);
+      receiver.expectedSeq += 1;
+    }
+    const ackSeq = receiver.expectedSeq;
+    const duplicate = !wasExpected;
 
-    const ackId = `ack_${seqNum}_${Date.now()}`;
+    if (duplicate) {
+      dispatch(addLogEntry({
+        text: `#${seqNum} 乱序到达（缺 #${ackSeq}），回重复 ACK`,
+        type: 'dup_ack',
+      }));
+      dispatch(setAnimationStatus(`#${seqNum} 乱序到达，回重复 ACK ${ackSeq}`));
+    } else {
+      dispatch(setWindow(acknowledgePacket(stateRef.current.window, ackSeq)));
+      dispatch(addLogEntry({
+        text: `${retransmitted ? '重传包' : '数据包'} #${seqNum} 到达，累计 ACK ${ackSeq}`,
+        type: 'success',
+      }));
+      dispatch(setAnimationStatus(`#${seqNum} 到达，回 ACK ${ackSeq}`));
+    }
+
+    const ackId = `${duplicate ? 'ack_dup' : 'ack'}_${seqNum}_${Date.now()}`;
     const ackBall: FlightBall = {
       id: ackId,
       progress: 0,
       trackY,
       isAck: true,
       isLost: false,
-      seqNum,
+      isDuplicateAck: duplicate,
+      seqNum: ackSeq,
       startTime: performance.now(),
       duration: getDur(ACK_MS),
     };
@@ -224,7 +258,61 @@ export function useCongestionControl(speed: number = 1) {
 
     dispatch(markPacketAcked(seqNum));
     dispatch(removeFlightBall(ackId));
+
+    if (!duplicate) {
+      // 缺口已补上，旧的重复 ACK 计数作废
+      duplicateAckCountRef.current.delete(seqNum);
+      if (stateRef.current.phase === CongestionPhase.FAST_RECOVERY) {
+        dispatch(setPhase(CongestionPhase.CONGESTION_AVOIDANCE));
+        dispatch(setAnimationStatus(`快恢复结束，#${seqNum} 已确认，回到拥塞避免`));
+      }
+      return;
+    }
+
+    // ── 重复 ACK：同一个缺口累计到 3 个就触发快重传 ──
+    const count = (duplicateAckCountRef.current.get(ackSeq) ?? 0) + 1;
+    duplicateAckCountRef.current.set(ackSeq, count);
+    dispatch(incrementDuplicateAck());
+    dispatch(setAnimationStatus(`重复 ACK ${ackSeq}（${count}/3）`));
+    dispatch(addLogEntry({ text: `重复 ACK ${ackSeq}（${count}/3）`, type: 'dup_ack' }));
+
+    if (count === 3) {
+      const wake = fastRetransmitWaitersRef.current.get(ackSeq);
+      if (wake) {
+        duplicateAckCountRef.current.delete(ackSeq);
+        wake();
+      } else {
+        dispatch(addLogEntry({
+          text: `#${ackSeq} 已累计 3 个重复 ACK，但它不在 RTO 等待中`,
+          type: 'info',
+        }));
+      }
+    }
   }, [dispatch, isActive, startFlight, getDur]);
+
+  /** 等待"该包被快重传唤醒"；被终止时同样 settle，避免 Promise 悬挂 */
+  const waitForFastRetransmit = useCallback((seqNum: number) => {
+    let settle: () => void = () => {};
+    const promise = new Promise<void>(resolve => { settle = resolve; });
+
+    const finish = () => {
+      fastRetransmitWaitersRef.current.delete(seqNum);
+      abortHandlersRef.current.delete(onAbort);
+      settle();
+    };
+    const onAbort = () => finish();
+
+    fastRetransmitWaitersRef.current.set(seqNum, finish);
+    abortHandlersRef.current.add(onAbort);
+
+    return {
+      promise,
+      dispose: () => {
+        fastRetransmitWaitersRef.current.delete(seqNum);
+        abortHandlersRef.current.delete(onAbort);
+      },
+    };
+  }, []);
 
   /**
    * 发送一个数据包：链路中途判定丢包 → 等待 RTO → 超时降窗 → 重传（重传同样可能丢）。
@@ -281,11 +369,11 @@ export function useCongestionControl(speed: number = 1) {
 
     const flight = startFlight(ball, getDur(FLIGHT_MS), token);
 
-    // ── 正常到达：等小球飞完，回 ACK ──
+    // ── 正常到达：等小球飞完，交接收端回 ACK ──
     if (!lost) {
       const result = await flight.promise;
       if (result !== 'arrived' || !isActive(token)) return;
-      await sendAck(seqNum, trackY, id, isRetransmission, token);
+      await deliverPacket(seqNum, trackY, id, isRetransmission, token);
       return;
     }
 
@@ -305,9 +393,48 @@ export function useCongestionControl(speed: number = 1) {
       type: 'error',
     }));
 
-    // RTO 从发送时刻起算，已经过去了小球飞到丢包点的时间
-    await sleep(Math.max(0, getDur(current.rtoConfig.baseMs) - lostAt), token);
+    // RTO 从发送时刻起算；期间若收到 3 个重复 ACK，走快重传而不再等 RTO
+    const remainingRto = Math.max(0, getDur(current.rtoConfig.baseMs) - lostAt);
+    const fast = waitForFastRetransmit(seqNum);
+    const outcome = await Promise.race([
+      sleep(remainingRto, token).then(() => 'timeout' as const),
+      fast.promise.then(() => 'fast' as const),
+    ]);
+    fast.dispose();
     if (!isActive(token)) return;
+
+    // ── 快重传：窗口已在等 RTO 期间减半，这里只补发 ──
+    if (outcome === 'fast') {
+      dispatch(removeFlightBall(id));
+      dispatch(incrementFastRetransmit());
+      windowReducedThisRttRef.current = true;
+      const fastResult = handleFastRetransmit(stateRef.current.window);
+      dispatch(setWindow(fastResult.window));
+      dispatch(setPhase(fastResult.phase));
+      dispatch(setAnimationStatus(
+        `#${seqNum} 收到 3 个重复 ACK，快重传（cwnd=${fastResult.window.cwnd}，进入快速恢复）`,
+      ));
+      dispatch(addLogEntry({
+        text: `3 个重复 ACK → 快重传 #${seqNum}，跳过 RTO，进入快速恢复`,
+        type: 'fast_retransmit',
+      }));
+
+      if (!canRetransmit(attempt, stateRef.current.rtoConfig.maxRetransmissions)) {
+        dispatch(addLogEntry({
+          text: `#${seqNum} 连续 ${attempt} 次发送失败，放弃重传`,
+          type: 'error',
+        }));
+        return;
+      }
+
+      dispatch(enqueueRetransmission({
+        seqNum,
+        attempt: attempt + 1,
+        originalBallId: id,
+      }));
+      await transmit(seqNum, trackY, attempt + 1, token);
+      return;
+    }
 
     dispatch(incrementTimeout());
     dispatch(removeFlightBall(id));
@@ -347,7 +474,7 @@ export function useCongestionControl(speed: number = 1) {
       originalBallId: id,
     }));
     await transmit(seqNum, trackY, attempt + 1, token);
-  }, [dispatch, isActive, sleep, startFlight, sendAck, getDur]);
+  }, [dispatch, isActive, sleep, startFlight, deliverPacket, waitForFastRetransmit, getDur]);
 
   const sendBatch = useCallback(async (token: number): Promise<void> => {
     if (!isActive(token)) return;

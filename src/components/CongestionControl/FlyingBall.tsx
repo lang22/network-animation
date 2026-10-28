@@ -98,18 +98,45 @@ const LostBall = styled.div<{ $x: number; $y: number }>`
   &::after { content: '✕'; color: white; font-size: 20px; font-weight: 900; text-shadow: 0 1px 2px rgba(0,0,0,0.4); }
 `;
 
+// 重复 ACK：同一个 ACK 号反复回送，用虚线琥珀色区分
+const DupAckBall = styled.div<{ $x: number; $y: number }>`
+  position: absolute;
+  left: ${({ $x }) => $x}px; top: ${({ $y }) => $y}px;
+  transform: translate(-50%, -50%);
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b 60%, #b45309);
+  border: 2px dashed rgba(255,255,255,0.7);
+  box-shadow: 0 0 8px rgba(245,158,11,0.45);
+  z-index: 21;
+  pointer-events: none;
+  will-change: left, top;
+  display: flex; align-items: center; justify-content: center;
+
+  &::after {
+    content: '↺';
+    color: white; font-size: 14px; font-weight: 900;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  }
+`;
+
 interface FlyingBallProps {
   x: number; y: number;
   isAck: boolean;
   isLost?: boolean;
   isRetransmission?: boolean;
+  isDuplicateAck?: boolean;
   seqNum?: number;
 }
 
-const FlyingBall: React.FC<FlyingBallProps> = React.memo(({ x, y, isAck, isLost, isRetransmission, seqNum }) => {
+const FlyingBall: React.FC<FlyingBallProps> = React.memo(({
+  x, y, isAck, isLost, isRetransmission, isDuplicateAck, seqNum,
+}) => {
   if (isLost) return <LostBall $x={x} $y={y} />;
 
-  if (isAck) return <AckBall $x={x} $y={y} />;
+  if (isAck) return isDuplicateAck
+    ? <DupAckBall $x={x} $y={y} />
+    : <AckBall $x={x} $y={y} />;
 
   return (
     <BallWrapper $x={x} $y={y} $retransmission={isRetransmission}>

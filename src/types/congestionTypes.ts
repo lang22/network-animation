@@ -34,6 +34,8 @@ export interface FlightBall {
   duration: number;
   attempt?: number;
   isRetransmission?: boolean;
+  /** 是否重复 ACK（接收端收到乱序包时回的 ACK） */
+  isDuplicateAck?: boolean;
 }
 
 export type PacketLifecycleStatus =
@@ -91,7 +93,7 @@ export interface CongestionUIState {
 export interface LogEntry {
   id: number;
   text: string;
-  type: 'info' | 'success' | 'error' | 'rtt' | 'timeout' | 'retransmit';
+  type: 'info' | 'success' | 'error' | 'rtt' | 'timeout' | 'retransmit' | 'dup_ack' | 'fast_retransmit';
 }
 
 export interface RtoConfig {
@@ -123,6 +125,10 @@ export interface CongestionState {
   dropNextSeq: number | null;
   timeoutCount: number;
   retransmissionCount: number;
+  /** 收到的重复 ACK 个数 */
+  duplicateAcks: number;
+  /** 快重传触发次数 */
+  fastRetransmits: number;
   animationStatus: string;
   eventLog: LogEntry[];
   logSeq: number;
