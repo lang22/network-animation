@@ -6,9 +6,11 @@ import congestionReducer, {
   enqueueRetransmission,
   dequeueRetransmission,
   setLossRate,
-  setDropNextSeq,
+  setDropSeqs,
+  removeDropSeq,
   incrementTimeout,
   incrementRetransmission,
+  incrementPartialAck,
   reset,
 } from '../congestionSlice';
 
@@ -49,13 +51,23 @@ describe('congestionSlice retransmission state', () => {
     let state = congestionReducer(undefined, reset());
 
     state = congestionReducer(state, setLossRate(0.2));
-    state = congestionReducer(state, setDropNextSeq(9));
+    state = congestionReducer(state, setDropSeqs([9, 12]));
     state = congestionReducer(state, incrementTimeout());
     state = congestionReducer(state, incrementRetransmission());
+    state = congestionReducer(state, incrementPartialAck());
 
     expect(state.lossRate).toBe(0.2);
-    expect(state.dropNextSeq).toBe(9);
+    expect(state.dropSeqs).toEqual([9, 12]);
     expect(state.timeoutCount).toBe(1);
     expect(state.retransmissionCount).toBe(1);
+    expect(state.partialAcks).toBe(1);
+  });
+
+  it('removes a single planned drop after it is consumed', () => {
+    let state = congestionReducer(undefined, reset());
+    state = congestionReducer(state, setDropSeqs([9, 12]));
+    state = congestionReducer(state, removeDropSeq(9));
+
+    expect(state.dropSeqs).toEqual([12]);
   });
 });

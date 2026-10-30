@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect, useState } from 'react';
+﻿import { useCallback, useRef, useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store';
 import {
   setPlaying,
@@ -19,11 +19,13 @@ import {
   enqueueRetransmission,
   dequeueRetransmission,
   setLossRate,
-  setDropNextSeq,
+  setDropSeqs,
+  removeDropSeq,
   incrementTimeout,
   incrementRetransmission,
   incrementDuplicateAck,
   incrementFastRetransmit,
+  incrementPartialAck,
   setAnimationStatus,
   addLogEntry,
   reset,
@@ -37,6 +39,7 @@ import {
   prepareNextBatch,
   shouldDropPacket,
   canRetransmit,
+  isPartialAck,
 } from '@/services/protocols/congestionService';
 import { CongestionPhase, FlightBall } from '@/types/congestionTypes';
 
@@ -66,6 +69,9 @@ function laneY(index: number, count: number): number {
 /** 一次飞行动画的结束方式 */
 type FlightResult = 'arrived' | 'frozen' | 'aborted';
 
+/** 唤醒等待中的丢包：fast = 3 个重复 ACK；partial = 快速恢复中的部分确认（NewReno） */
+type WakeMode = 'fast' | 'partial';
+
 export function useCongestionControl(speed: number = 1) {
   const dispatch = useAppDispatch();
   const state = useAppSelector(s => s.congestion);
@@ -89,8 +95,8 @@ export function useCongestionControl(speed: number = 1) {
   });
   /** 同一个缺失序号上累计的重复 ACK 个数 */
   const duplicateAckCountRef = useRef<Map<number, number>>(new Map());
-  /** 正在等待 RTO 的丢包：seq -> 唤醒函数（快重传用） */
-  const fastRetransmitWaitersRef = useRef<Map<number, () => void>>(new Map());
+  /** 正在等待 RTO 的丢包：seq -> 唤醒函数（快重传 / 部分确认） */
+  const fastRetransmitWaitersRef = useRef<Map<number, (mode: WakeMode) => void>>(new Map());
 
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
@@ -277,7 +283,23 @@ export function useCongestionControl(speed: number = 1) {
     if (!duplicate) {
       // 缺口已补上，旧的重复 ACK 计数作废
       duplicateAckCountRef.current.delete(seqNum);
-      if (stateRef.current.phase === CongestionPhase.FAST_RECOVERY) {
+
+      const latest = stateRef.current;
+      if (latest.phase === CongestionPhase.FAST_RECOVERY) {
+        // NewReno：ACK 只推进了一部分（还有包没到），立即补发新的缺口，窗口不再降
+        if (isPartialAck(ackSeq, latest.window.nextSeq)) {
+          const wake = fastRetransmitWaitersRef.current.get(ackSeq);
+          if (wake) {
+            dispatch(setAnimationStatus(`部分 ACK ${ackSeq}，快速恢复中继续补发`));
+            dispatch(addLogEntry({
+              text: `部分 ACK ${ackSeq}（还有包未确认），立即补发 #${ackSeq}`,
+              type: 'partial_ack',
+            }));
+            wake('partial');
+          }
+          return;
+        }
+
         dispatch(setPhase(CongestionPhase.CONGESTION_AVOIDANCE));
         dispatch(setAnimationStatus(`快恢复结束，#${seqNum} 已确认，回到拥塞避免`));
       }
@@ -298,21 +320,24 @@ export function useCongestionControl(speed: number = 1) {
 
     if (count === 3) {
       const wake = fastRetransmitWaitersRef.current.get(ackSeq);
-      if (wake) wake();
+      if (wake) wake('fast');
     }
   }, [dispatch, isActive, startFlight, getDur]);
 
-  /** 等待"该包被快重传唤醒"；被终止时同样 settle，避免 Promise 悬挂 */
-  const waitForFastRetransmit = useCallback((seqNum: number) => {
-    let settle: () => void = () => {};
-    const promise = new Promise<void>(resolve => { settle = resolve; });
+  /**
+   * 等待该丢包被唤醒（3 个重复 ACK 或快速恢复中的部分确认）。
+   * 终止时同样 settle，避免 Promise 悬挂。
+   */
+  const waitForRetransmit = useCallback((seqNum: number) => {
+    let settle: (mode: WakeMode) => void = () => {};
+    const promise = new Promise<WakeMode>(resolve => { settle = resolve; });
 
-    const finish = () => {
+    const finish = (mode: WakeMode) => {
       fastRetransmitWaitersRef.current.delete(seqNum);
       abortHandlersRef.current.delete(onAbort);
-      settle();
+      settle(mode);
     };
-    const onAbort = () => finish();
+    const onAbort = () => finish('fast');
 
     fastRetransmitWaitersRef.current.set(seqNum, finish);
     abortHandlersRef.current.add(onAbort);
@@ -343,10 +368,10 @@ export function useCongestionControl(speed: number = 1) {
     const lossConfig = {
       enabled: current.packetLossEnabled,
       lossRate: current.lossRate,
-      dropNextSeq: current.dropNextSeq,
+      dropSeqs: current.dropSeqs,
     };
     const lost = shouldDropPacket(lossConfig, seqNum);
-    if (lost && lossConfig.dropNextSeq === seqNum) dispatch(setDropNextSeq(null));
+    if (lost && lossConfig.dropSeqs.includes(seqNum)) dispatch(removeDropSeq(seqNum));
 
     const id = `${isRetransmission ? 'rtx' : 'ball'}_${seqNum}_${attempt}_${Date.now()}`;
     const now = performance.now();
@@ -405,31 +430,42 @@ export function useCongestionControl(speed: number = 1) {
       type: 'error',
     }));
 
-    // RTO 从发送时刻起算；期间若收到 3 个重复 ACK，走快重传而不再等 RTO
+    // RTO 从发送时刻起算；期间收到 3 个重复 ACK（或快速恢复中的部分确认）就提前重传
     const remainingRto = Math.max(0, getDur(current.rtoConfig.baseMs) - lostAt);
-    const fast = waitForFastRetransmit(seqNum);
+    const wake = waitForRetransmit(seqNum);
     const outcome = await Promise.race([
       sleep(remainingRto, token).then(() => 'timeout' as const),
-      fast.promise.then(() => 'fast' as const),
+      wake.promise,
     ]);
-    fast.dispose();
+    wake.dispose();
     if (!isActive(token)) return;
 
-    // ── 快重传：窗口已在等 RTO 期间减半，这里只补发 ──
-    if (outcome === 'fast') {
+    if (outcome !== 'timeout') {
       dispatch(removeFlightBall(id));
-      dispatch(incrementFastRetransmit());
-      windowReducedThisRttRef.current = true;
-      const fastResult = handleFastRetransmit(stateRef.current.window);
-      dispatch(setWindow(fastResult.window));
-      dispatch(setPhase(fastResult.phase));
-      dispatch(setAnimationStatus(
-        `#${seqNum} 收到 3 个重复 ACK，快重传（cwnd=${fastResult.window.cwnd}，进入快速恢复）`,
-      ));
-      dispatch(addLogEntry({
-        text: `3 个重复 ACK → 快重传 #${seqNum}，跳过 RTO，进入快速恢复`,
-        type: 'fast_retransmit',
-      }));
+
+      if (outcome === 'fast') {
+        // ── 快重传：3 个重复 ACK，窗口减半进入快速恢复 ──
+        dispatch(incrementFastRetransmit());
+        windowReducedThisRttRef.current = true;
+        const fastResult = handleFastRetransmit(stateRef.current.window);
+        dispatch(setWindow(fastResult.window));
+        dispatch(setPhase(fastResult.phase));
+        dispatch(setAnimationStatus(
+          `#${seqNum} 收到 3 个重复 ACK，快重传（cwnd=${fastResult.window.cwnd}，进入快速恢复）`,
+        ));
+        dispatch(addLogEntry({
+          text: `3 个重复 ACK → 快重传 #${seqNum}，跳过 RTO，进入快速恢复`,
+          type: 'fast_retransmit',
+        }));
+      } else {
+        // ── NewReno 部分确认：只补发新的缺口，窗口保持不动 ──
+        dispatch(incrementPartialAck());
+        dispatch(setAnimationStatus(`部分确认 → 补发 #${seqNum}（窗口保持）`));
+        dispatch(addLogEntry({
+          text: `部分确认后补发 #${seqNum}，cwnd 保持 ${stateRef.current.window.cwnd}`,
+          type: 'partial_ack',
+        }));
+      }
 
       if (!canRetransmit(attempt, stateRef.current.rtoConfig.maxRetransmissions)) {
         dispatch(addLogEntry({
@@ -486,7 +522,7 @@ export function useCongestionControl(speed: number = 1) {
       originalBallId: id,
     }));
     await transmit(seqNum, trackY, attempt + 1, token);
-  }, [dispatch, isActive, sleep, startFlight, deliverPacket, waitForFastRetransmit, getDur]);
+  }, [dispatch, isActive, sleep, startFlight, deliverPacket, waitForRetransmit, getDur]);
 
   const sendBatch = useCallback(async (token: number): Promise<void> => {
     if (!isActive(token)) return;
@@ -559,11 +595,11 @@ export function useCongestionControl(speed: number = 1) {
   const restoreLossControls = useCallback((controls: {
     packetLossEnabled: boolean;
     lossRate: number;
-    dropNextSeq: number | null;
+    dropSeqs: number[];
   }) => {
     dispatch(setPacketLossEnabled(controls.packetLossEnabled));
     dispatch(setLossRate(controls.lossRate));
-    dispatch(setDropNextSeq(controls.dropNextSeq));
+    dispatch(setDropSeqs(controls.dropSeqs));
   }, [dispatch]);
 
   const performFullDemo = useCallback(async () => {
@@ -572,7 +608,7 @@ export function useCongestionControl(speed: number = 1) {
     const controls = {
       packetLossEnabled: stateRef.current.packetLossEnabled,
       lossRate: stateRef.current.lossRate,
-      dropNextSeq: stateRef.current.dropNextSeq,
+      dropSeqs: stateRef.current.dropSeqs,
     };
 
     cancelRun();
@@ -606,7 +642,7 @@ export function useCongestionControl(speed: number = 1) {
     const controls = {
       packetLossEnabled: stateRef.current.packetLossEnabled,
       lossRate: stateRef.current.lossRate,
-      dropNextSeq: stateRef.current.dropNextSeq,
+      dropSeqs: stateRef.current.dropSeqs,
     };
 
     cancelRun();
@@ -666,6 +702,7 @@ export function useCongestionControl(speed: number = 1) {
     togglePacketLoss,
     setPlaying: (value: boolean) => dispatch(setPlaying(value)),
     setLossRate: (value: number) => dispatch(setLossRate(value)),
-    setDropNextSeq: (value: number | null) => dispatch(setDropNextSeq(value)),
+    setDropSeqs: (value: number[]) => dispatch(setDropSeqs(value)),
   };
 }
+

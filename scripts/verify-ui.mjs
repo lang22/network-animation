@@ -93,17 +93,19 @@ try {
     label?.lastElementChild?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
   await page.getByRole('button', { name: '0%', exact: true }).click();
-  await page.locator('input[type="number"]').fill('8');
+  // 同一窗口丢两个包：先快重传 #8，收到部分 ACK 12 后再补发 #12（NewReno）
+  await page.locator('input[placeholder="8,12"]').fill('8,12');
   await page.getByRole('button', { name: '2x' }).click();
   await page.getByRole('button', { name: '⚡ 完整演示' }).click();
 
-  let fastRetransmit = 0;
-  for (let i = 0; i < 400 && fastRetransmit === 0; i += 1) {
+  let partialAcks = 0;
+  for (let i = 0; i < 400 && partialAcks === 0; i += 1) {
     await sleep(100);
-    fastRetransmit = numberAfter(await text(page), '快重传');
+    partialAcks = numberAfter(await text(page), '部分 ACK');
   }
   const stats = await text(page);
-  check(fastRetransmit >= 1, '指定丢包后没有触发快重传');
+  check(numberAfter(stats, '快重传') >= 1, '指定丢包后没有触发快重传');
+  check(partialAcks >= 1, '同一窗口两个丢包没有触发部分确认补发（NewReno）');
   check(numberAfter(stats, '重复 ACK') >= 3, '重复 ACK 计数不足 3');
   check(numberAfter(stats, 'RTO 超时') === 0, '快重传路径上仍然走了 RTO');
   await page.screenshot({ path: path.join(outDir, 'fast-retransmit.png') });

@@ -24,7 +24,7 @@ describe('CongestionVisualizer', () => {
 
     expect(screen.getByText('TCP 拥塞控制')).toBeInTheDocument();
     expect(screen.getByText('丢包率')).toBeInTheDocument();
-    expect(screen.getByText('指定丢包序号')).toBeInTheDocument();
+    expect(screen.getByText(/指定丢包序号/)).toBeInTheDocument();
     expect(screen.getByText(/RTO 超时/)).toBeInTheDocument();
     expect(screen.getByText(/重传次数/)).toBeInTheDocument();
     expect(screen.getByText('⚡ 完整演示')).toBeInTheDocument();
@@ -36,8 +36,8 @@ describe('CongestionVisualizer', () => {
     fireEvent.click(screen.getByText('20%'));
     expect(store.getState().congestion.lossRate).toBe(0.2);
 
-    fireEvent.click(screen.getByText(/丢下一个包 #1/));
+    fireEvent.click(screen.getByText(/丢掉 #1/));
     expect(store.getState().congestion.packetLossEnabled).toBe(true);
-    expect(store.getState().congestion.dropNextSeq).toBe(1);
+    expect(store.getState().congestion.dropSeqs).toEqual([1]);
   });
 });

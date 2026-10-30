@@ -3,6 +3,7 @@ import {
   handleFastRetransmit,
   shouldDropPacket,
   canRetransmit,
+  isPartialAck,
 } from '../congestionService';
 import { CongestionPhase, SenderWindowState } from '@/types/congestionTypes';
 
@@ -35,15 +36,23 @@ describe('congestionService retransmission helpers', () => {
     expect(shouldDropPacket({
       enabled: true,
       lossRate: 0,
-      dropNextSeq: 7,
+      dropSeqs: [7],
     }, 7, 0.99)).toBe(true);
+  });
+
+  it('drops every configured sequence in the same window', () => {
+    const config = { enabled: true, lossRate: 0, dropSeqs: [8, 12] };
+
+    expect(shouldDropPacket(config, 8, 0.99)).toBe(true);
+    expect(shouldDropPacket(config, 12, 0.99)).toBe(true);
+    expect(shouldDropPacket(config, 9, 0.99)).toBe(false);
   });
 
   it('uses loss rate when deterministic sequence does not match', () => {
     expect(shouldDropPacket({
       enabled: true,
       lossRate: 0.1,
-      dropNextSeq: 7,
+      dropSeqs: [7],
     }, 8, 0.05)).toBe(true);
   });
 
@@ -51,8 +60,13 @@ describe('congestionService retransmission helpers', () => {
     expect(shouldDropPacket({
       enabled: false,
       lossRate: 1,
-      dropNextSeq: 1,
+      dropSeqs: [1],
     }, 1, 0)).toBe(false);
+  });
+
+  it('detects partial ACKs in fast recovery', () => {
+    expect(isPartialAck(12, 16)).toBe(true);
+    expect(isPartialAck(16, 16)).toBe(false);
   });
 
   it('halves the window and enters fast recovery on 3 duplicate ACKs', () => {

@@ -36,11 +36,12 @@ const initialState: CongestionState = {
     maxRetransmissions: 3,
   },
   lossRate: 0.05,
-  dropNextSeq: null,
+  dropSeqs: [],
   timeoutCount: 0,
   retransmissionCount: 0,
   duplicateAcks: 0,
   fastRetransmits: 0,
+  partialAcks: 0,
   animationStatus: '',
   eventLog: [],
   logSeq: 0,
@@ -120,8 +121,11 @@ export const congestionSlice = createSlice({
     setLossRate: (state, action: PayloadAction<number>) => {
       state.lossRate = Math.max(0, Math.min(1, action.payload));
     },
-    setDropNextSeq: (state, action: PayloadAction<number | null>) => {
-      state.dropNextSeq = action.payload;
+    setDropSeqs: (state, action: PayloadAction<number[]>) => {
+      state.dropSeqs = action.payload;
+    },
+    removeDropSeq: (state, action: PayloadAction<number>) => {
+      state.dropSeqs = state.dropSeqs.filter(seq => seq !== action.payload);
     },
     incrementTimeout: (state) => {
       state.timeoutCount += 1;
@@ -134,6 +138,9 @@ export const congestionSlice = createSlice({
     },
     incrementFastRetransmit: (state) => {
       state.fastRetransmits += 1;
+    },
+    incrementPartialAck: (state) => {
+      state.partialAcks += 1;
     },
     setAnimationStatus: (state, action: PayloadAction<string>) => {
       state.animationStatus = action.payload;
@@ -172,11 +179,13 @@ export const {
   incrementAcked,
   setPacketLossEnabled,
   setLossRate,
-  setDropNextSeq,
+  setDropSeqs,
+  removeDropSeq,
   incrementTimeout,
   incrementRetransmission,
   incrementDuplicateAck,
   incrementFastRetransmit,
+  incrementPartialAck,
   setAnimationStatus,
   addLogEntry,
   reset,

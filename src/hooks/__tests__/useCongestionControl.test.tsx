@@ -4,7 +4,7 @@ import { act, renderHook } from '@testing-library/react';
 import { store } from '@/store';
 import {
   reset,
-  setDropNextSeq,
+  setDropSeqs,
   setLossRate,
   setPacketLossEnabled,
 } from '@/store/slices/congestionSlice';
@@ -28,7 +28,7 @@ const advance = async (ms: number, step = 50) => {
 const forceLossOnFirstPacket = () => {
   store.dispatch(setPacketLossEnabled(true));
   store.dispatch(setLossRate(0));
-  store.dispatch(setDropNextSeq(1));
+  store.dispatch(setDropSeqs([1]));
 };
 
 beforeEach(() => {
@@ -136,7 +136,7 @@ describe('useCongestionControl 丢包与重传', () => {
     act(() => {
       store.dispatch(setPacketLossEnabled(true));
       store.dispatch(setLossRate(0));
-      store.dispatch(setDropNextSeq(congestion().window.nextSeq));
+      store.dispatch(setDropSeqs([congestion().window.nextSeq]));
     });
 
     let waited = 0;
@@ -155,6 +155,41 @@ describe('useCongestionControl 丢包与重传', () => {
     expect(state.window.ssthresh).toBe(Math.max(Math.floor(peakCwnd / 2), 2));
     expect(state.window.cwnd).toBeLessThanOrEqual(state.window.ssthresh);
     expect(state.eventLog.some(e => e.text.includes('快重传'))).toBe(true);
+
+    act(() => { result.current.resetAll(); });
+    await act(async () => { await demo; });
+  });
+
+  it('同一窗口丢两个包时，部分 ACK 直接补发第二个缺口（NewReno）', async () => {
+    const { result } = renderControl(10);
+
+    let demo: Promise<void> | undefined;
+    act(() => { demo = result.current.performSlowStart(); });
+
+    await advance(2500, 20);
+    expect(congestion().window.cwnd).toBeGreaterThanOrEqual(8);
+
+    // 下一批的头两个缺口：第一个包和它后面第 4 个包
+    const first = congestion().window.nextSeq;
+    act(() => {
+      store.dispatch(setPacketLossEnabled(true));
+      store.dispatch(setLossRate(0));
+      store.dispatch(setDropSeqs([first, first + 3]));
+    });
+
+    let waited = 0;
+    while (waited < 8000 && congestion().partialAcks < 1) {
+      await act(async () => { jest.advanceTimersByTime(20); });
+      waited += 20;
+    }
+
+    const state = congestion();
+    expect(state.fastRetransmits).toBeGreaterThanOrEqual(1);
+    expect(state.partialAcks).toBeGreaterThanOrEqual(1);
+    expect(state.retransmissionCount).toBeGreaterThanOrEqual(2);
+    expect(state.timeoutCount).toBe(0);
+    expect(state.dropSeqs).toEqual([]);
+    expect(state.eventLog.some(e => e.text.includes('部分确认'))).toBe(true);
 
     act(() => { result.current.resetAll(); });
     await act(async () => { await demo; });

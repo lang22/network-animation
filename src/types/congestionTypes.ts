@@ -93,7 +93,7 @@ export interface CongestionUIState {
 export interface LogEntry {
   id: number;
   text: string;
-  type: 'info' | 'success' | 'error' | 'rtt' | 'timeout' | 'retransmit' | 'dup_ack' | 'fast_retransmit';
+  type: 'info' | 'success' | 'error' | 'rtt' | 'timeout' | 'retransmit' | 'dup_ack' | 'fast_retransmit' | 'partial_ack';
 }
 
 export interface RtoConfig {
@@ -104,7 +104,8 @@ export interface RtoConfig {
 export interface LossDecisionConfig {
   enabled: boolean;
   lossRate: number;
-  dropNextSeq: number | null;
+  /** 需要强制丢弃的序号（可多个，用来演示同一窗口多个包丢失） */
+  dropSeqs: number[];
 }
 
 export interface CongestionState {
@@ -122,13 +123,15 @@ export interface CongestionState {
   retransmissionQueue: RetransmissionItem[];
   rtoConfig: RtoConfig;
   lossRate: number;
-  dropNextSeq: number | null;
+  dropSeqs: number[];
   timeoutCount: number;
   retransmissionCount: number;
   /** 收到的重复 ACK 个数 */
   duplicateAcks: number;
   /** 快重传触发次数 */
   fastRetransmits: number;
+  /** 快速恢复中由部分 ACK 触发的补发次数（NewReno） */
+  partialAcks: number;
   animationStatus: string;
   eventLog: LogEntry[];
   logSeq: number;

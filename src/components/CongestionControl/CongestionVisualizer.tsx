@@ -126,6 +126,7 @@ const LogLine = styled.div<{ $type: string }>`
     $type === 'retransmit' ? darkTheme.colors.primaryLight :
     $type === 'dup_ack' ? darkTheme.colors.warning :
     $type === 'fast_retransmit' ? darkTheme.colors.secondaryLight :
+    $type === 'partial_ack' ? darkTheme.colors.accent :
     $type === 'success' ? darkTheme.colors.success :
     darkTheme.colors.textMuted};
   opacity: 0.85;
@@ -178,25 +179,28 @@ const CongestionVisualizer: React.FC = () => {
                 </MiniBtn>
               ))}
             </CompactGrid>
-            <div style={{ fontSize: 10, color: darkTheme.colors.textMuted }}>指定丢包序号</div>
+            <div style={{ fontSize: 10, color: darkTheme.colors.textMuted }}>指定丢包序号（可填多个，如 8,12）</div>
             <NumberInput
-              type="number"
-              min={1}
-              value={ctrl.dropNextSeq ?? ''}
+              type="text"
+              placeholder="8,12"
+              value={ctrl.dropSeqs.join(',')}
               disabled={ctrl.isPlaying}
               onChange={event => {
-                const value = Number(event.target.value);
-                ctrl.setDropNextSeq(Number.isFinite(value) && value > 0 ? value : null);
+                const seqs = event.target.value
+                  .split(/[^\d]+/)
+                  .map(Number)
+                  .filter(seq => Number.isFinite(seq) && seq > 0);
+                ctrl.setDropSeqs([...new Set(seqs)]);
               }}
             />
             <MiniBtn
               onClick={() => {
                 if (!ctrl.packetLossEnabled) ctrl.togglePacketLoss();
-                ctrl.setDropNextSeq(ctrl.window.nextSeq);
+                ctrl.setDropSeqs([...new Set([...ctrl.dropSeqs, ctrl.window.nextSeq])]);
               }}
               disabled={ctrl.isPlaying}
             >
-              丢下一个包 #{ctrl.window.nextSeq}
+              丢掉 #{ctrl.window.nextSeq}
             </MiniBtn>
             <div style={{ fontSize: 10, color: darkTheme.colors.textMuted }}>速度</div>
             <div style={{ display: 'flex', gap: 4 }}>
@@ -247,6 +251,7 @@ const CongestionVisualizer: React.FC = () => {
 
             <StatRow>重复 ACK <span style={{ color: darkTheme.colors.warning }}>{ctrl.duplicateAcks}</span></StatRow>
             <StatRow>快重传 <span style={{ color: darkTheme.colors.secondaryLight }}>{ctrl.fastRetransmits}</span></StatRow>
+            <StatRow>部分 ACK <span style={{ color: darkTheme.colors.accent }}>{ctrl.partialAcks}</span></StatRow>
             <StatRow>RTO 超时 <span style={{ color: darkTheme.colors.warning }}>{ctrl.timeoutCount}</span></StatRow>
             <StatRow>重传次数 <span>{ctrl.retransmissionCount}</span></StatRow>
 

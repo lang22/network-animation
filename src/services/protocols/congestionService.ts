@@ -144,8 +144,16 @@ export function shouldDropPacket(
   }
 
   if (!config.enabled) return false;
-  if (config.dropNextSeq !== null && config.dropNextSeq === seqNum) return true;
+  if (config.dropSeqs.includes(seqNum ?? -1)) return true;
   return randomValue < config.lossRate;
+}
+
+/**
+ * 快速恢复中收到的新 ACK 是否只确认了一部分（NewReno 的部分确认）：
+ * ackSeq 是接收端期望的下一个序号，只要它还没到 nextSeq，就说明还有包没到。
+ */
+export function isPartialAck(ackSeq: number, nextSeq: number): boolean {
+  return ackSeq < nextSeq;
 }
 
 export { INITIAL_CWND, INITIAL_SSTHRESH, MAX_CWND };
