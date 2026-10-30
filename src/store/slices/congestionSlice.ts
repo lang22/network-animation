@@ -29,6 +29,7 @@ const initialState: CongestionState = {
   ackedPackets: 0,
   packetLossEnabled: false,
   sackEnabled: false,
+  isPaused: false,
   inFlightPackets: [],
   retransmissionQueue: [],
   rtoConfig: {
@@ -122,6 +123,9 @@ export const congestionSlice = createSlice({
     setSackEnabled: (state, action: PayloadAction<boolean>) => {
       state.sackEnabled = action.payload;
     },
+    setPaused: (state, action: PayloadAction<boolean>) => {
+      state.isPaused = action.payload;
+    },
     setLossRate: (state, action: PayloadAction<number>) => {
       state.lossRate = Math.max(0, Math.min(1, action.payload));
     },
@@ -183,6 +187,7 @@ export const {
   incrementAcked,
   setPacketLossEnabled,
   setSackEnabled,
+  setPaused,
   setLossRate,
   setDropSeqs,
   removeDropSeq,

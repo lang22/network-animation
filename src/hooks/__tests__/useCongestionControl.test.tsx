@@ -231,6 +231,37 @@ describe('useCongestionControl 丢包与重传', () => {
     await act(async () => { await demo; });
   });
 
+  it('暂停后动画与计时器冻结，继续后接着跑', async () => {
+    const { result } = renderControl(10);
+
+    let demo: Promise<void> | undefined;
+    act(() => { demo = result.current.performFullDemo(); });
+
+    await advance(1200, 20);
+    const rttBefore = congestion().rttCount;
+    expect(rttBefore).toBeGreaterThan(0);
+    expect(Object.keys(result.current.progressMap).length).toBeGreaterThan(0);
+
+    act(() => { result.current.togglePause(); });
+    expect(congestion().isPaused).toBe(true);
+
+    const progressAtPause = { ...result.current.progressMap };
+    await advance(4000, 20);
+
+    // 暂停期间不产生新轮次，小球也不动
+    expect(congestion().rttCount).toBe(rttBefore);
+    expect(result.current.progressMap).toEqual(progressAtPause);
+
+    act(() => { result.current.togglePause(); });
+    expect(congestion().isPaused).toBe(false);
+
+    await advance(3000, 20);
+    expect(congestion().rttCount).toBeGreaterThan(rttBefore);
+
+    act(() => { result.current.resetAll(); });
+    await act(async () => { await demo; });
+  });
+
   it('终止演示会取消等待中的 RTO，且不会自行恢复', async () => {
     const { result } = renderControl();
 
@@ -259,3 +290,4 @@ describe('useCongestionControl 丢包与重传', () => {
     expect(congestion().isPlaying).toBe(false);
   });
 });
+

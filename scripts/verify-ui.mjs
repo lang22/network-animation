@@ -133,6 +133,27 @@ try {
   check(numberAfter(sackStats, '快重传') >= 1, 'SACK 模式没有触发快重传');
   check(numberAfter(sackStats, 'RTO 超时') === 0, 'SACK 路径上仍然走了 RTO');
   await page.screenshot({ path: path.join(outDir, 'sack.png') });
+
+  // ── 场景 4：暂停应冻结轮次，继续后恢复推进 ──
+  await page.reload({ waitUntil: 'load' });
+  await sleep(800);
+  await page.getByRole('button', { name: '2x' }).click();
+  await page.getByRole('button', { name: '⚡ 完整演示' }).click();
+  await sleep(2500);
+
+  const rttBefore = numberAfter(await text(page), 'RTT 轮次');
+  await page.getByRole('button', { name: '⏸ 暂停' }).click();
+  await sleep(1500);
+  const rttPaused = numberAfter(await text(page), 'RTT 轮次');
+  await page.screenshot({ path: path.join(outDir, 'paused.png') });
+
+  await page.getByRole('button', { name: '▶ 继续' }).click();
+  await sleep(2500);
+  const rttAfter = numberAfter(await text(page), 'RTT 轮次');
+
+  check(rttBefore > 0, '暂停场景：演示没有开始');
+  check(rttPaused === rttBefore, `暂停期间轮次仍在推进（${rttBefore} → ${rttPaused}）`);
+  check(rttAfter > rttBefore, '继续后演示没有恢复推进');
 } finally {
   await browser.close();
 }

@@ -22,6 +22,7 @@ import {
   setDropSeqs,
   removeDropSeq,
   setSackEnabled,
+  setPaused,
   incrementTimeout,
   incrementRetransmission,
   incrementDuplicateAck,
@@ -77,6 +78,13 @@ type FlightResult = 'arrived' | 'frozen' | 'aborted';
 /** 唤醒等待中的丢包：fast = 3 个重复 ACK；partial = 快速恢复中的部分确认（NewReno） */
 type WakeMode = 'fast' | 'partial';
 
+/** 可暂停的等待：记录目标时刻，暂停时清掉定时器，恢复时按剩余时间续期 */
+interface Sleeper {
+  target: number;
+  timer: ReturnType<typeof setTimeout> | 0;
+  arm: (delay: number) => void;
+}
+
 export function useCongestionControl(speed: number = 1) {
   const dispatch = useAppDispatch();
   const state = useAppSelector(s => s.congestion);
@@ -102,6 +110,10 @@ export function useCongestionControl(speed: number = 1) {
   const duplicateAckCountRef = useRef<Map<number, number>>(new Map());
   /** 正在等待 RTO 的丢包：seq -> 唤醒函数（快重传 / 部分确认） */
   const fastRetransmitWaitersRef = useRef<Map<number, (mode: WakeMode) => void>>(new Map());
+  /** 动画时钟：暂停期间累积的偏移，nowMs() = performance.now() - offset */
+  const pauseRef = useRef({ paused: false, pausedAt: 0, offset: 0 });
+  /** 进行中的等待（RTO / 轮间隔），暂停时挂起、恢复时续期 */
+  const sleepersRef = useRef<Set<Sleeper>>(new Set());
 
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
@@ -110,37 +122,53 @@ export function useCongestionControl(speed: number = 1) {
 
   const getDur = useCallback((base: number) => base / speedRef.current, []);
 
+  /** 动画时钟：扣掉暂停累积的时间，暂停期间保持不变 */
+  const nowMs = useCallback(() => performance.now() - pauseRef.current.offset, []);
+
   const isActive = useCallback(
     (token: number) => isMountedRef.current && token === runTokenRef.current,
     [],
   );
 
-  /** 可被终止打断的等待 */
+  /** 可暂停、可被终止打断的等待 */
   const sleep = useCallback((ms: number, token: number): Promise<void> => {
     return new Promise<void>(resolve => {
       if (!isActive(token)) { resolve(); return; }
 
       const finish = () => {
-        clearTimeout(timer);
-        abortHandlersRef.current.delete(finish);
+        if (sleeper.timer) clearTimeout(sleeper.timer);
+        sleeper.timer = 0;
+        sleepersRef.current.delete(sleeper);
+        abortHandlersRef.current.delete(onAbort);
         resolve();
       };
-      const timer = setTimeout(finish, ms);
-      abortHandlersRef.current.add(finish);
+      const onAbort = () => finish();
+
+      const sleeper: Sleeper = {
+        target: nowMs() + ms,
+        timer: 0,
+        arm: delay => {
+          if (!sleeper.timer) sleeper.timer = setTimeout(finish, delay);
+        },
+      };
+
+      sleepersRef.current.add(sleeper);
+      abortHandlersRef.current.add(onAbort);
+      sleeper.arm(ms);
     });
-  }, [isActive]);
+  }, [isActive, nowMs]);
 
   // ── 单全局 rAF 循环 ──
   const startGlobalLoop = useCallback(() => {
-    if (frameRef.current) return;
+    if (frameRef.current || pauseRef.current.paused) return;
 
     const tick = () => {
-      if (!isMountedRef.current) {
+      if (!isMountedRef.current || pauseRef.current.paused) {
         frameRef.current = null;
         return;
       }
 
-      const now = performance.now();
+      const now = nowMs();
       const next: Record<string, number> = {};
       let hasActive = false;
 
@@ -178,7 +206,51 @@ export function useCongestionControl(speed: number = 1) {
     };
 
     frameRef.current = requestAnimationFrame(tick);
-  }, []);
+  }, [nowMs]);
+
+  /** 暂停：停掉 rAF，挂起所有等待中的定时器 */
+  const pauseRun = useCallback(() => {
+    const pause = pauseRef.current;
+    if (pause.paused || !stateRef.current.isPlaying) return;
+
+    pause.paused = true;
+    pause.pausedAt = performance.now();
+
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    sleepersRef.current.forEach(sleeper => {
+      if (sleeper.timer) clearTimeout(sleeper.timer);
+      sleeper.timer = 0;
+    });
+
+    dispatch(setPaused(true));
+    dispatch(setAnimationStatus('已暂停'));
+  }, [dispatch]);
+
+  /** 继续：把时钟整体后移，小球按原进度接着飞，等待中的定时器按剩余时间续期 */
+  const resumeRun = useCallback(() => {
+    const pause = pauseRef.current;
+    if (!pause.paused) return;
+
+    const delta = performance.now() - pause.pausedAt;
+    pause.offset += delta;
+    pause.paused = false;
+    pause.pausedAt = 0;
+
+    // 时钟通过 offset 保持连续，小球起始时间不用动，进度会从冻结处接着走
+    sleepersRef.current.forEach(sleeper => sleeper.arm(Math.max(0, sleeper.target - nowMs())));
+
+    startGlobalLoop();
+    dispatch(setPaused(false));
+    dispatch(setAnimationStatus('继续演示'));
+  }, [dispatch, nowMs, startGlobalLoop]);
+
+  const togglePause = useCallback(() => {
+    if (pauseRef.current.paused) resumeRun();
+    else pauseRun();
+  }, [pauseRun, resumeRun]);
 
   /**
    * 启动一次飞行。返回的 promise 由到达 / 冻结 / 终止三种情况 settle。
@@ -222,6 +294,8 @@ export function useCongestionControl(speed: number = 1) {
     receiverRef.current = { expectedSeq: 1, received: new Set<number>() };
     duplicateAckCountRef.current.clear();
     fastRetransmitWaitersRef.current.clear();
+    pauseRef.current = { paused: false, pausedAt: 0, offset: 0 };
+    sleepersRef.current.clear();
     if (resetProgress) setProgressMap({});
   }, []);
 
@@ -280,7 +354,7 @@ export function useCongestionControl(speed: number = 1) {
       isDuplicateAck: duplicate,
       sackBlocks: sackBlocks.length > 0 ? sackBlocks : undefined,
       seqNum: ackSeq,
-      startTime: performance.now(),
+      startTime: nowMs(),
       duration: getDur(ACK_MS),
     };
 
@@ -364,7 +438,7 @@ export function useCongestionControl(speed: number = 1) {
         if (wake) wake('fast');
       }
     }
-  }, [dispatch, isActive, startFlight, getDur]);
+  }, [dispatch, isActive, startFlight, getDur, nowMs]);
 
   /**
    * 等待该丢包被唤醒（3 个重复 ACK 或快速恢复中的部分确认）。
@@ -416,7 +490,7 @@ export function useCongestionControl(speed: number = 1) {
     if (lost && lossConfig.dropSeqs.includes(seqNum)) dispatch(removeDropSeq(seqNum));
 
     const id = `${isRetransmission ? 'rtx' : 'ball'}_${seqNum}_${attempt}_${Date.now()}`;
-    const now = performance.now();
+    const now = nowMs();
     const ball: FlightBall = {
       id,
       progress: 0,
@@ -563,7 +637,7 @@ export function useCongestionControl(speed: number = 1) {
       originalBallId: id,
     }));
     await transmit(seqNum, trackY, attempt + 1, token);
-  }, [dispatch, isActive, sleep, startFlight, deliverPacket, waitForRetransmit, getDur]);
+  }, [dispatch, isActive, sleep, startFlight, deliverPacket, waitForRetransmit, getDur, nowMs]);
 
   const sendBatch = useCallback(async (token: number): Promise<void> => {
     if (!isActive(token)) return;
@@ -752,6 +826,7 @@ export function useCongestionControl(speed: number = 1) {
     performFullDemo,
     performSlowStart,
     resetAll,
+    togglePause,
     togglePacketLoss,
     toggleSack,
     setPlaying: (value: boolean) => dispatch(setPlaying(value)),

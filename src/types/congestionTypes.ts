@@ -129,6 +129,8 @@ export interface CongestionState {
   packetLossEnabled: boolean;
   /** 是否启用选择确认（SACK） */
   sackEnabled: boolean;
+  /** 演示是否已暂停 */
+  isPaused: boolean;
   inFlightPackets: InFlightPacket[];
   retransmissionQueue: RetransmissionItem[];
   rtoConfig: RtoConfig;

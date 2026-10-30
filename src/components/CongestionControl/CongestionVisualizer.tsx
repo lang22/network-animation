@@ -209,9 +209,14 @@ const CongestionVisualizer: React.FC = () => {
               {[0.5, 1, 2, 3].map(s => <SpeedBtn key={s} $a={speed === s} onClick={() => setSpeed(s)}>{s}x</SpeedBtn>)}
             </div>
             {ctrl.animationStatus && <Status>{ctrl.animationStatus}</Status>}
-            <Btn onClick={ctrl.resetAll} disabled={false} style={{ background: ctrl.isPlaying ? darkTheme.colors.error : undefined, color: ctrl.isPlaying ? '#fff' : undefined, border: ctrl.isPlaying ? 'none' : undefined }}>
-              {ctrl.isPlaying ? '⏹ 终止' : '重置'}
-            </Btn>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn onClick={ctrl.togglePause} disabled={!ctrl.isPlaying} style={{ flex: 1 }}>
+                {ctrl.isPaused ? '▶ 继续' : '⏸ 暂停'}
+              </Btn>
+              <Btn onClick={ctrl.resetAll} disabled={false} style={{ flex: 1, background: ctrl.isPlaying ? darkTheme.colors.error : undefined, color: ctrl.isPlaying ? '#fff' : undefined, border: ctrl.isPlaying ? 'none' : undefined }}>
+                {ctrl.isPlaying ? '⏹ 终止' : '重置'}
+              </Btn>
+            </div>
           </PanelC>
         </Panel>
 
