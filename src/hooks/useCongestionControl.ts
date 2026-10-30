@@ -1,4 +1,4 @@
-﻿import { useCallback, useRef, useEffect, useState } from 'react';
+import { useCallback, useRef, useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store';
 import {
   setPlaying,
@@ -21,6 +21,7 @@ import {
   setLossRate,
   setDropSeqs,
   removeDropSeq,
+  setSackEnabled,
   incrementTimeout,
   incrementRetransmission,
   incrementDuplicateAck,
@@ -40,6 +41,8 @@ import {
   shouldDropPacket,
   canRetransmit,
   isPartialAck,
+  buildSackBlocks,
+  missingSeqs,
 } from '@/services/protocols/congestionService';
 import { CongestionPhase, FlightBall } from '@/types/congestionTypes';
 
@@ -51,6 +54,8 @@ const TRACK_RANGE = 70;
 const MAX_LANE_GAP = 6;
 /** 演示用的慢启动阈值：窗口最多长到 16 个包，保证画布上的小球还看得清 */
 const DEMO_SSTHRESH = 12;
+/** SACK 触发时一次最多补发几个缺口，避免小球糊成一片 */
+const MAX_SACK_RETRANSMIT = 3;
 
 /** 丢包判定发生的位置（0~1，相对链路长度），小球会停在这里变红并消散 */
 const LOSS_PROGRESS = 0.55;
@@ -240,19 +245,29 @@ export function useCongestionControl(speed: number = 1) {
     const ackSeq = receiver.expectedSeq;
     const duplicate = !wasExpected;
 
+    // 开启 SACK 时，ACK 里带上已收到的乱序区间
+    const sackBlocks = stateRef.current.sackEnabled
+      ? buildSackBlocks(ackSeq, receiver.received)
+      : [];
+    const sackText = sackBlocks.length > 0
+      ? ` [SACK ${sackBlocks
+        .map(block => (block.end - block.start === 1 ? `${block.start}` : `${block.start}-${block.end - 1}`))
+        .join(',')}]`
+      : '';
+
     if (duplicate) {
       dispatch(addLogEntry({
-        text: `#${seqNum} 乱序到达（缺 #${ackSeq}），回重复 ACK`,
+        text: `#${seqNum} 乱序到达（缺 #${ackSeq}），回重复 ACK ${ackSeq}${sackText}`,
         type: 'dup_ack',
       }));
-      dispatch(setAnimationStatus(`#${seqNum} 乱序到达，回重复 ACK ${ackSeq}`));
+      dispatch(setAnimationStatus(`#${seqNum} 乱序到达，回重复 ACK ${ackSeq}${sackText}`));
     } else {
       dispatch(setWindow(acknowledgePacket(stateRef.current.window, ackSeq)));
       dispatch(addLogEntry({
-        text: `${retransmitted ? '重传包' : '数据包'} #${seqNum} 到达，累计 ACK ${ackSeq}`,
+        text: `${retransmitted ? '重传包' : '数据包'} #${seqNum} 到达，累计 ACK ${ackSeq}${sackText}`,
         type: 'success',
       }));
-      dispatch(setAnimationStatus(`#${seqNum} 到达，回 ACK ${ackSeq}`));
+      dispatch(setAnimationStatus(`#${seqNum} 到达，回 ACK ${ackSeq}${sackText}`));
     }
 
     const ackId = `${duplicate ? 'ack_dup' : 'ack'}_${seqNum}_${Date.now()}`;
@@ -263,6 +278,7 @@ export function useCongestionControl(speed: number = 1) {
       isAck: true,
       isLost: false,
       isDuplicateAck: duplicate,
+      sackBlocks: sackBlocks.length > 0 ? sackBlocks : undefined,
       seqNum: ackSeq,
       startTime: performance.now(),
       duration: getDur(ACK_MS),
@@ -286,16 +302,25 @@ export function useCongestionControl(speed: number = 1) {
 
       const latest = stateRef.current;
       if (latest.phase === CongestionPhase.FAST_RECOVERY) {
-        // NewReno：ACK 只推进了一部分（还有包没到），立即补发新的缺口，窗口不再降
+        // ACK 只推进了一部分（还有包没到）
         if (isPartialAck(ackSeq, latest.window.nextSeq)) {
+          dispatch(incrementPartialAck());
           const wake = fastRetransmitWaitersRef.current.get(ackSeq);
           if (wake) {
+            // NewReno：立即补发新的缺口，窗口不再降
             dispatch(setAnimationStatus(`部分 ACK ${ackSeq}，快速恢复中继续补发`));
             dispatch(addLogEntry({
               text: `部分 ACK ${ackSeq}（还有包未确认），立即补发 #${ackSeq}`,
               type: 'partial_ack',
             }));
             wake('partial');
+          } else {
+            // SACK 已经提前在补这个缺口了
+            dispatch(setAnimationStatus(`部分 ACK ${ackSeq}，缺口已在补发中`));
+            dispatch(addLogEntry({
+              text: `部分 ACK ${ackSeq}，缺口已在补发中`,
+              type: 'partial_ack',
+            }));
           }
           return;
         }
@@ -319,8 +344,25 @@ export function useCongestionControl(speed: number = 1) {
     }
 
     if (count === 3) {
-      const wake = fastRetransmitWaitersRef.current.get(ackSeq);
-      if (wake) wake('fast');
+      if (stateRef.current.sackEnabled) {
+        // SACK：一次算出窗口里所有缺口，一起补发（第一个走降窗，其余保持窗口）
+        const lastSent = stateRef.current.window.nextSeq - 1;
+        const holes = missingSeqs(ackSeq, sackBlocks, lastSent).slice(0, MAX_SACK_RETRANSMIT);
+        const wakeable = holes.filter(hole => fastRetransmitWaitersRef.current.has(hole));
+
+        dispatch(addLogEntry({
+          text: `SACK 显示缺口 ${wakeable.map(hole => `#${hole}`).join('、')}，一次补齐`,
+          type: 'sack',
+        }));
+        dispatch(setAnimationStatus(`SACK 缺口 ${wakeable.map(hole => `#${hole}`).join('、')}，同时补发`));
+
+        wakeable.forEach((hole, index) => {
+          fastRetransmitWaitersRef.current.get(hole)?.(index === 0 ? 'fast' : 'partial');
+        });
+      } else {
+        const wake = fastRetransmitWaitersRef.current.get(ackSeq);
+        if (wake) wake('fast');
+      }
     }
   }, [dispatch, isActive, startFlight, getDur]);
 
@@ -458,11 +500,10 @@ export function useCongestionControl(speed: number = 1) {
           type: 'fast_retransmit',
         }));
       } else {
-        // ── NewReno 部分确认：只补发新的缺口，窗口保持不动 ──
-        dispatch(incrementPartialAck());
-        dispatch(setAnimationStatus(`部分确认 → 补发 #${seqNum}（窗口保持）`));
+        // ── 非首个缺口（NewReno 部分确认 / SACK 的后续缺口）：只补发，窗口保持不动 ──
+        dispatch(setAnimationStatus(`补发 #${seqNum}（窗口保持 ${stateRef.current.window.cwnd}）`));
         dispatch(addLogEntry({
-          text: `部分确认后补发 #${seqNum}，cwnd 保持 ${stateRef.current.window.cwnd}`,
+          text: `补发 #${seqNum}，cwnd 保持 ${stateRef.current.window.cwnd}`,
           type: 'partial_ack',
         }));
       }
@@ -594,10 +635,12 @@ export function useCongestionControl(speed: number = 1) {
 
   const restoreLossControls = useCallback((controls: {
     packetLossEnabled: boolean;
+    sackEnabled: boolean;
     lossRate: number;
     dropSeqs: number[];
   }) => {
     dispatch(setPacketLossEnabled(controls.packetLossEnabled));
+    dispatch(setSackEnabled(controls.sackEnabled));
     dispatch(setLossRate(controls.lossRate));
     dispatch(setDropSeqs(controls.dropSeqs));
   }, [dispatch]);
@@ -607,6 +650,7 @@ export function useCongestionControl(speed: number = 1) {
 
     const controls = {
       packetLossEnabled: stateRef.current.packetLossEnabled,
+      sackEnabled: stateRef.current.sackEnabled,
       lossRate: stateRef.current.lossRate,
       dropSeqs: stateRef.current.dropSeqs,
     };
@@ -641,6 +685,7 @@ export function useCongestionControl(speed: number = 1) {
 
     const controls = {
       packetLossEnabled: stateRef.current.packetLossEnabled,
+      sackEnabled: stateRef.current.sackEnabled,
       lossRate: stateRef.current.lossRate,
       dropSeqs: stateRef.current.dropSeqs,
     };
@@ -685,6 +730,14 @@ export function useCongestionControl(speed: number = 1) {
     ));
   }, [dispatch]);
 
+  const toggleSack = useCallback(() => {
+    const enabled = !stateRef.current.sackEnabled;
+    dispatch(setSackEnabled(enabled));
+    dispatch(setAnimationStatus(
+      enabled ? '选择确认（SACK）开启：一次补齐所有缺口' : '选择确认关闭：按 NewReno 逐个补发',
+    ));
+  }, [dispatch]);
+
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -700,9 +753,11 @@ export function useCongestionControl(speed: number = 1) {
     performSlowStart,
     resetAll,
     togglePacketLoss,
+    toggleSack,
     setPlaying: (value: boolean) => dispatch(setPlaying(value)),
     setLossRate: (value: number) => dispatch(setLossRate(value)),
     setDropSeqs: (value: number[]) => dispatch(setDropSeqs(value)),
   };
 }
+
 

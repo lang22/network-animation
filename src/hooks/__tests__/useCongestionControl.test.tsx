@@ -7,6 +7,7 @@ import {
   setDropSeqs,
   setLossRate,
   setPacketLossEnabled,
+  setSackEnabled,
 } from '@/store/slices/congestionSlice';
 import { useCongestionControl } from '@/hooks/useCongestionControl';
 
@@ -189,7 +190,42 @@ describe('useCongestionControl 丢包与重传', () => {
     expect(state.retransmissionCount).toBeGreaterThanOrEqual(2);
     expect(state.timeoutCount).toBe(0);
     expect(state.dropSeqs).toEqual([]);
-    expect(state.eventLog.some(e => e.text.includes('部分确认'))).toBe(true);
+    expect(state.eventLog.some(e => e.text.includes('部分 ACK'))).toBe(true);
+
+    act(() => { result.current.resetAll(); });
+    await act(async () => { await demo; });
+  });
+
+  it('开启 SACK 后一次补发所有已知缺口', async () => {
+    const { result } = renderControl(10);
+
+    let demo: Promise<void> | undefined;
+    act(() => { demo = result.current.performSlowStart(); });
+
+    await advance(2500, 20);
+    expect(congestion().window.cwnd).toBeGreaterThanOrEqual(8);
+
+    const first = congestion().window.nextSeq;
+    act(() => {
+      store.dispatch(setPacketLossEnabled(true));
+      store.dispatch(setLossRate(0));
+      store.dispatch(setSackEnabled(true));
+      store.dispatch(setDropSeqs([first, first + 3]));
+    });
+
+    let waited = 0;
+    while (waited < 8000 && congestion().fastRetransmits < 1) {
+      await act(async () => { jest.advanceTimersByTime(20); });
+      waited += 20;
+    }
+
+    const state = congestion();
+    expect(state.fastRetransmits).toBe(1);
+    // 两个缺口在同一次 SACK 触发里一起补发
+    expect(state.retransmissionCount).toBeGreaterThanOrEqual(2);
+    expect(state.timeoutCount).toBe(0);
+    expect(state.eventLog.some(e => e.text.includes('SACK'))).toBe(true);
+    expect(state.eventLog.some(e => e.text.includes('一次补齐'))).toBe(true);
 
     act(() => { result.current.resetAll(); });
     await act(async () => { await demo; });

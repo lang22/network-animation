@@ -1,5 +1,5 @@
 // TCP 拥塞控制算法服务
-import { CongestionPhase, LossDecisionConfig, SenderWindowState } from '@/types/congestionTypes';
+import { CongestionPhase, LossDecisionConfig, SackBlock, SenderWindowState } from '@/types/congestionTypes';
 
 const INITIAL_CWND = 1;      // MSS
 const INITIAL_SSTHRESH = 64; // MSS
@@ -154,6 +154,41 @@ export function shouldDropPacket(
  */
 export function isPartialAck(ackSeq: number, nextSeq: number): boolean {
   return ackSeq < nextSeq;
+}
+
+/**
+ * 把接收端的乱序缓存整理成 SACK 块（RFC 2018 的简化版）：
+ * 只保留累计 ACK 之上的连续区间，end 为开区间。
+ */
+export function buildSackBlocks(expectedSeq: number, received: Set<number>): SackBlock[] {
+  const seqs = [...received].filter(seq => seq >= expectedSeq).sort((a, b) => a - b);
+  const blocks: SackBlock[] = [];
+
+  for (const seq of seqs) {
+    const last = blocks[blocks.length - 1];
+    if (last && seq === last.end) {
+      last.end = seq + 1;
+    } else {
+      blocks.push({ start: seq, end: seq + 1 });
+    }
+  }
+
+  return blocks;
+}
+
+/**
+ * 根据 SACK 块算出 [ackSeq, lastSent] 之间所有没被确认的序号。
+ * 这是 SACK 相对 NewReno 的关键：一次就能看到窗口里所有缺口。
+ */
+export function missingSeqs(ackSeq: number, blocks: SackBlock[], lastSent: number): number[] {
+  const covered = (seq: number) => blocks.some(block => seq >= block.start && seq < block.end);
+  const missing: number[] = [];
+
+  for (let seq = ackSeq; seq <= lastSent; seq += 1) {
+    if (!covered(seq)) missing.push(seq);
+  }
+
+  return missing;
 }
 
 export { INITIAL_CWND, INITIAL_SSTHRESH, MAX_CWND };

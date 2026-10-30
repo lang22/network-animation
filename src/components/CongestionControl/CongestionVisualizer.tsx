@@ -127,6 +127,7 @@ const LogLine = styled.div<{ $type: string }>`
     $type === 'dup_ack' ? darkTheme.colors.warning :
     $type === 'fast_retransmit' ? darkTheme.colors.secondaryLight :
     $type === 'partial_ack' ? darkTheme.colors.accent :
+    $type === 'sack' ? darkTheme.colors.primaryLight :
     $type === 'success' ? darkTheme.colors.success :
     darkTheme.colors.textMuted};
   opacity: 0.85;
@@ -166,6 +167,7 @@ const CongestionVisualizer: React.FC = () => {
             <Btn $v="accent" onClick={ctrl.performFullDemo} disabled={ctrl.isPlaying}>⚡ 完整演示</Btn>
             <Btn $v="primary" onClick={ctrl.performSlowStart} disabled={ctrl.isPlaying}>慢启动</Btn>
             <ToggleRow>丢包模拟 <Toggle $on={ctrl.packetLossEnabled} onClick={ctrl.togglePacketLoss} /></ToggleRow>
+            <ToggleRow>选择确认 SACK <Toggle $on={ctrl.sackEnabled} onClick={ctrl.toggleSack} /></ToggleRow>
             <div style={{ fontSize: 10, color: darkTheme.colors.textMuted }}>丢包率</div>
             <CompactGrid>
               {[0, 0.05, 0.1, 0.2].map(rate => (

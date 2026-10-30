@@ -15,6 +15,12 @@ export enum ScenarioMode {
   FULL_DEMO = 'full_demo',
 }
 
+/** SACK 块：[start, end) 的已接收区间，end 为开区间 */
+export interface SackBlock {
+  start: number;
+  end: number;
+}
+
 /** 飞行中的小球 */
 export interface FlightBall {
   id: string;
@@ -36,6 +42,8 @@ export interface FlightBall {
   isRetransmission?: boolean;
   /** 是否重复 ACK（接收端收到乱序包时回的 ACK） */
   isDuplicateAck?: boolean;
+  /** ACK 携带的 SACK 块（开启选择确认时才有） */
+  sackBlocks?: SackBlock[];
 }
 
 export type PacketLifecycleStatus =
@@ -93,7 +101,7 @@ export interface CongestionUIState {
 export interface LogEntry {
   id: number;
   text: string;
-  type: 'info' | 'success' | 'error' | 'rtt' | 'timeout' | 'retransmit' | 'dup_ack' | 'fast_retransmit' | 'partial_ack';
+  type: 'info' | 'success' | 'error' | 'rtt' | 'timeout' | 'retransmit' | 'dup_ack' | 'fast_retransmit' | 'partial_ack' | 'sack';
 }
 
 export interface RtoConfig {
@@ -119,6 +127,8 @@ export interface CongestionState {
   lostPackets: number;
   ackedPackets: number;
   packetLossEnabled: boolean;
+  /** 是否启用选择确认（SACK） */
+  sackEnabled: boolean;
   inFlightPackets: InFlightPacket[];
   retransmissionQueue: RetransmissionItem[];
   rtoConfig: RtoConfig;

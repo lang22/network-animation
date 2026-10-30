@@ -4,6 +4,8 @@ import {
   shouldDropPacket,
   canRetransmit,
   isPartialAck,
+  buildSackBlocks,
+  missingSeqs,
 } from '../congestionService';
 import { CongestionPhase, SenderWindowState } from '@/types/congestionTypes';
 
@@ -67,6 +69,25 @@ describe('congestionService retransmission helpers', () => {
   it('detects partial ACKs in fast recovery', () => {
     expect(isPartialAck(12, 16)).toBe(true);
     expect(isPartialAck(16, 16)).toBe(false);
+  });
+
+  it('builds SACK blocks from out-of-order arrivals', () => {
+    expect(buildSackBlocks(8, new Set([9, 10, 11, 13, 14, 15]))).toEqual([
+      { start: 9, end: 12 },
+      { start: 13, end: 16 },
+    ]);
+    expect(buildSackBlocks(8, new Set([9, 10, 12]))).toEqual([
+      { start: 9, end: 11 },
+      { start: 12, end: 13 },
+    ]);
+  });
+
+  it('finds every missing sequence from SACK blocks', () => {
+    const blocks = [{ start: 9, end: 12 }, { start: 13, end: 16 }];
+
+    expect(missingSeqs(8, blocks, 15)).toEqual([8, 12]);
+    expect(missingSeqs(8, blocks, 11)).toEqual([8]);
+    expect(missingSeqs(16, [], 15)).toEqual([]);
   });
 
   it('halves the window and enters fast recovery on 3 duplicate ACKs', () => {
