@@ -262,6 +262,41 @@ describe('useCongestionControl 丢包与重传', () => {
     await act(async () => { await demo; });
   });
 
+  it('单步推进一轮 RTT 后自动暂停', async () => {
+    const { result } = renderControl(10);
+
+    let demo: Promise<void> | undefined;
+    act(() => { demo = result.current.performFullDemo(); });
+    await advance(1200, 20);
+
+    act(() => { result.current.togglePause(); });
+    expect(congestion().isPaused).toBe(true);
+    const before = { rtt: congestion().rttCount, acked: congestion().ackedPackets };
+
+    act(() => { result.current.stepCycle(); });
+    expect(congestion().isPaused).toBe(false);
+
+    await advance(2500, 20);
+    expect(congestion().isPaused).toBe(true);
+
+    const after = { rtt: congestion().rttCount, acked: congestion().ackedPackets };
+    expect(after.acked).toBeGreaterThan(before.acked);
+
+    // 暂停期间不再推进
+    await advance(2000, 20);
+    expect(congestion().rttCount).toBe(after.rtt);
+    expect(congestion().ackedPackets).toBe(after.acked);
+
+    // 再单步一次，继续往前走
+    act(() => { result.current.stepCycle(); });
+    await advance(2500, 20);
+    expect(congestion().isPaused).toBe(true);
+    expect(congestion().ackedPackets).toBeGreaterThan(after.acked);
+
+    act(() => { result.current.resetAll(); });
+    await act(async () => { await demo; });
+  });
+
   it('终止演示会取消等待中的 RTO，且不会自行恢复', async () => {
     const { result } = renderControl();
 

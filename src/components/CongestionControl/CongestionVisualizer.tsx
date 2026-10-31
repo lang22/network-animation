@@ -213,10 +213,13 @@ const CongestionVisualizer: React.FC = () => {
               <Btn onClick={ctrl.togglePause} disabled={!ctrl.isPlaying} style={{ flex: 1 }}>
                 {ctrl.isPaused ? '▶ 继续' : '⏸ 暂停'}
               </Btn>
-              <Btn onClick={ctrl.resetAll} disabled={false} style={{ flex: 1, background: ctrl.isPlaying ? darkTheme.colors.error : undefined, color: ctrl.isPlaying ? '#fff' : undefined, border: ctrl.isPlaying ? 'none' : undefined }}>
-                {ctrl.isPlaying ? '⏹ 终止' : '重置'}
+              <Btn onClick={ctrl.stepCycle} disabled={!ctrl.isPaused} style={{ flex: 1 }}>
+                ⏭ 单步
               </Btn>
             </div>
+            <Btn onClick={ctrl.resetAll} disabled={false} style={{ background: ctrl.isPlaying ? darkTheme.colors.error : undefined, color: ctrl.isPlaying ? '#fff' : undefined, border: ctrl.isPlaying ? 'none' : undefined }}>
+              {ctrl.isPlaying ? '⏹ 终止' : '重置'}
+            </Btn>
           </PanelC>
         </Panel>
 

@@ -112,6 +112,8 @@ export function useCongestionControl(speed: number = 1) {
   const fastRetransmitWaitersRef = useRef<Map<number, (mode: WakeMode) => void>>(new Map());
   /** 动画时钟：暂停期间累积的偏移，nowMs() = performance.now() - offset */
   const pauseRef = useRef({ paused: false, pausedAt: 0, offset: 0 });
+  /** 单步标志：本轮 RTT 结束后自动暂停 */
+  const pauseAfterCycleRef = useRef(false);
   /** 进行中的等待（RTO / 轮间隔），暂停时挂起、恢复时续期 */
   const sleepersRef = useRef<Set<Sleeper>>(new Set());
 
@@ -154,7 +156,8 @@ export function useCongestionControl(speed: number = 1) {
 
       sleepersRef.current.add(sleeper);
       abortHandlersRef.current.add(onAbort);
-      sleeper.arm(ms);
+      // 暂停中创建的等待先不排期，恢复时统一续期
+      if (!pauseRef.current.paused) sleeper.arm(ms);
     });
   }, [isActive, nowMs]);
 
@@ -215,6 +218,7 @@ export function useCongestionControl(speed: number = 1) {
 
     pause.paused = true;
     pause.pausedAt = performance.now();
+    pauseAfterCycleRef.current = false;
 
     if (frameRef.current !== null) {
       cancelAnimationFrame(frameRef.current);
@@ -246,6 +250,15 @@ export function useCongestionControl(speed: number = 1) {
     dispatch(setPaused(false));
     dispatch(setAnimationStatus('继续演示'));
   }, [dispatch, nowMs, startGlobalLoop]);
+
+  /** 单步：从暂停处继续跑，到下一个 RTT 边界再自动暂停 */
+  const stepCycle = useCallback(() => {
+    if (!pauseRef.current.paused) return;
+
+    pauseAfterCycleRef.current = true;
+    dispatch(setAnimationStatus('单步：推进一轮 RTT'));
+    resumeRun();
+  }, [dispatch, resumeRun]);
 
   const togglePause = useCallback(() => {
     if (pauseRef.current.paused) resumeRun();
@@ -295,6 +308,7 @@ export function useCongestionControl(speed: number = 1) {
     duplicateAckCountRef.current.clear();
     fastRetransmitWaitersRef.current.clear();
     pauseRef.current = { paused: false, pausedAt: 0, offset: 0 };
+    pauseAfterCycleRef.current = false;
     sleepersRef.current.clear();
     if (resetProgress) setProgressMap({});
   }, []);
@@ -746,13 +760,18 @@ export function useCongestionControl(speed: number = 1) {
     for (let i = 0; i < 9; i++) {
       if (!isActive(token)) return;
       await runRttCycle(token);
+      // 单步：一轮结束就停（最后一步让演示正常收尾）
+      if (i < 8 && pauseAfterCycleRef.current) {
+        pauseAfterCycleRef.current = false;
+        pauseRun();
+      }
       await sleep(getDur(500), token);
     }
 
     if (!isActive(token)) return;
     dispatch(setAnimationStatus('拥塞控制演示结束'));
     dispatch(setPlaying(false));
-  }, [dispatch, isActive, cancelRun, sleep, restoreLossControls, runRttCycle, getDur]);
+  }, [dispatch, isActive, cancelRun, sleep, restoreLossControls, runRttCycle, pauseRun, getDur]);
 
   const performSlowStart = useCallback(async () => {
     if (stateRef.current.isPlaying) return;
@@ -780,13 +799,17 @@ export function useCongestionControl(speed: number = 1) {
     for (let i = 0; i < 8; i++) {
       if (!isActive(token)) return;
       await runRttCycle(token);
+      if (i < 7 && pauseAfterCycleRef.current) {
+        pauseAfterCycleRef.current = false;
+        pauseRun();
+      }
       await sleep(getDur(450), token);
     }
 
     if (!isActive(token)) return;
     dispatch(setAnimationStatus('慢启动演示结束'));
     dispatch(setPlaying(false));
-  }, [dispatch, isActive, cancelRun, sleep, restoreLossControls, runRttCycle, getDur]);
+  }, [dispatch, isActive, cancelRun, sleep, restoreLossControls, runRttCycle, pauseRun, getDur]);
 
   const resetAll = useCallback(() => {
     cancelRun();
@@ -827,6 +850,7 @@ export function useCongestionControl(speed: number = 1) {
     performSlowStart,
     resetAll,
     togglePause,
+    stepCycle,
     togglePacketLoss,
     toggleSack,
     setPlaying: (value: boolean) => dispatch(setPlaying(value)),

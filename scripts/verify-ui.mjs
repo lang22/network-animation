@@ -147,6 +147,15 @@ try {
   const rttPaused = numberAfter(await text(page), 'RTT 轮次');
   await page.screenshot({ path: path.join(outDir, 'paused.png') });
 
+  // 单步：推进一轮后应再次自动暂停
+  const ackedBefore = numberAfter(await text(page), '已确认');
+  await page.getByRole('button', { name: '⏭ 单步' }).click();
+  await sleep(3000);
+  const stepStats = await text(page);
+  check(await page.getByRole('button', { name: '▶ 继续' }).isEnabled(), '单步后没有自动暂停');
+  check(numberAfter(stepStats, '已确认') > ackedBefore, '单步没有推进任何数据');
+  await page.screenshot({ path: path.join(outDir, 'step.png') });
+
   await page.getByRole('button', { name: '▶ 继续' }).click();
   await sleep(2500);
   const rttAfter = numberAfter(await text(page), 'RTT 轮次');
