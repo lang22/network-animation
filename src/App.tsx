@@ -5,6 +5,7 @@ import Home from '@/containers/Home';
 import Simulation from '@/containers/Simulation';
 import ProtocolDetail from '@/containers/ProtocolDetail';
 import CongestionVisualizer from '@/components/CongestionControl/CongestionVisualizer';
+import HttpVisualizer from '@/components/Http/HttpVisualizer';
 
 const App: React.FC = () => {
   return (
@@ -14,6 +15,7 @@ const App: React.FC = () => {
           <Route path="/" element={<Home />} />
           <Route path="/protocol/tcp" element={<Simulation />} />
           <Route path="/protocol/congestion" element={<CongestionVisualizer />} />
+          <Route path="/protocol/http" element={<HttpVisualizer />} />
           <Route path="/protocol/:id" element={<ProtocolDetail />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

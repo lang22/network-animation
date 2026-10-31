@@ -42,6 +42,14 @@
 10. **演示可终止** — 演示任务带批次号，点「终止」会连带取消正在等待的 RTO 与动画
 11. **暂停 / 继续 / 单步** — 随时冻结动画与 RTO 计时；暂停后「单步」推进一整轮 RTT 再自动停下
 
+### HTTP 协议模拟器 (`/protocol/http`)
+
+1. **请求/响应动画** — 请求包从浏览器飞向服务器，服务器处理片刻后响应包飞回
+2. **原始报文展示** — 右侧按 HTTP/1.1 原文展示起始行、头部、正文（响应含 HTML body）
+3. **GET / POST 切换** — POST 自动补 `Content-Type` 与 `Content-Length`（按 UTF-8 字节数）
+4. **路径可编辑** — 默认 `/index.html`，可改成任意路径再发送
+5. **事件日志 + 速度** — 0.5x / 1x / 2x，日志记录请求发出、服务器处理、响应返回、渲染完成
+
 ### 动画系统
 
 - **出现动画** - 数据包弹出（scale 0→1 + opacity），带弹性回弹
@@ -127,6 +135,19 @@ src/
   70    │  传输/挥手     │  DATA_ACK / FIN2
   80    │  挥手          │  ACK2
 ```
+
+## 最近修改 (2026-11-01)
+
+### HTTP 协议模拟器
+
+1. **新页面 `/protocol/http`** — 三栏布局：控制 / 画布 / 报文详情；首页已有的 HTTP 卡片现在能进到真实页面
+2. **状态机 + rAF** — `useHttpFlow` 用 `idle → request → processing → response → done` 五态驱动，请求/响应各一次飞行动画；只有一次交互，没有引入 Redux store
+3. **报文构造** — `httpService` 负责生成 HTTP/1.1 请求与响应（`Content-Length` 用自写的 UTF-8 字节计数，jsdom 没有 `TextEncoder`）
+4. **测试** — service 6 个、hook 3 个、页面冒烟 2 个（共 70 个）
+
+### 验证
+
+- 真机截图：请求包 `GET /index.html` 飞向服务器 → 响应包 `200 OK` 飞回 → 右侧报文区显示完整请求/响应头与 HTML body，日志记录四个阶段
 
 ## 最近修改 (2026-10-31)
 
@@ -248,7 +269,7 @@ src/
 
 ### 中优先级
 
-1. **HTTP 协议模拟器** — 握手后发送 HTTP GET，展示应用层
+1. **HTTP/2 与 HTTPS** — 现在是 HTTP/1.1 明文；HTTPS 可展示 TLS 握手，HTTP/2 可展示多路复用
 2. **多种关闭场景** — 同时关闭/服务器主动关闭/半关闭
 3. **更细的单步** — 现在是「一次一轮 RTT」，还可以细到逐 ACK / 逐重传事件
 
@@ -282,6 +303,10 @@ src/
 | 拥塞控制测试 | `src/services/protocols/__tests__/congestionService.test.ts` |
 | 拥塞控制测试 | `src/store/slices/__tests__/congestionSlice.test.ts` |
 | 丢包/重传/终止测试 | `src/hooks/__tests__/useCongestionControl.test.tsx` |
+| HTTP 页面 | `src/components/Http/HttpVisualizer.tsx` |
+| HTTP 状态机 | `src/hooks/useHttpFlow.ts` |
+| HTTP 报文构造 | `src/services/protocols/httpService.ts` |
+| HTTP 测试 | `src/services/protocols/__tests__/httpService.test.ts` |
 
 ## 快速启动
 
@@ -289,7 +314,7 @@ src/
 npm install          # 安装依赖
 npm run dev          # 开发服务器 http://localhost:3000
 npm run build        # 生产构建
-npm test             # 运行测试 (59 tests)
+npm test             # 运行测试 (70 tests)
 npm run lint         # ESLint 检查
 npm run test:coverage # 覆盖率（逻辑层门槛）
 npm run verify:ui    # 需要先 npm start：截图验收布局与快重传

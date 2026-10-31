@@ -163,6 +163,19 @@ try {
   check(rttBefore > 0, '暂停场景：演示没有开始');
   check(rttPaused === rttBefore, `暂停期间轮次仍在推进（${rttBefore} → ${rttPaused}）`);
   check(rttAfter > rttBefore, '继续后演示没有恢复推进');
+
+  // ── 场景 5：HTTP 页面能发送请求并渲染报文 ──
+  await page.goto(new URL('/protocol/http', url).href, { waitUntil: 'load' });
+  await sleep(800);
+  await page.getByRole('button', { name: '📨 发送请求' }).click();
+  await sleep(900);
+  check((await text(page)).includes('GET /index.html HTTP/1.1'), 'HTTP 页面没有显示请求报文');
+
+  await sleep(3600);
+  const httpDone = await text(page);
+  check(httpDone.includes('HTTP/1.1 200 OK'), 'HTTP 页面没有显示响应报文');
+  check(httpDone.includes('✅ 完成'), 'HTTP 请求没有走到完成状态');
+  await page.screenshot({ path: path.join(outDir, 'http.png') });
 } finally {
   await browser.close();
 }
