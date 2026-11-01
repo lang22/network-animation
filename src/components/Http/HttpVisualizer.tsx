@@ -3,8 +3,8 @@ import styled, { keyframes } from 'styled-components';
 import { darkTheme } from '@/styles/theme';
 import { useHttpFlow } from '@/hooks/useHttpFlow';
 import Header from '@/components/Layout/Header';
-import { formatMessage, reasonPhrase, TLS_STEPS, DEFAULT_PATH } from '@/services/protocols/httpService';
-import { HttpMethod, HttpPhase } from '@/types/httpTypes';
+import { formatMessage, reasonPhrase, DEFAULT_PATH } from '@/services/protocols/httpService';
+import { HttpMethod, HttpPhase, HttpVersion, StreamStatus } from '@/types/httpTypes';
 
 // ==================== 布局 ====================
 const Page = styled.div`
@@ -13,7 +13,7 @@ const Page = styled.div`
   background: ${darkTheme.colors.background}; overflow: hidden;
 `;
 const Main = styled.div`
-  display: grid; grid-template-columns: 220px 1fr 320px;
+  display: grid; grid-template-columns: 220px 1fr 340px;
   gap: 16px; padding: 16px; height: 100%; box-sizing: border-box;
   min-height: 0; overflow: hidden;
 `;
@@ -33,14 +33,12 @@ const PanelC = styled.div`
 `;
 
 // ==================== 控件 ====================
-const Btn = styled.button<{ $v?: 'primary' | 'accent' | 'ghost' }>`
+const Btn = styled.button<{ $v?: 'primary' | 'accent' }>`
   width: 100%; padding: 11px 14px; border-radius: 8px;
   font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; border: none;
   ${({ $v }) => $v === 'accent' ? `
     background: linear-gradient(90deg, ${darkTheme.colors.primary}, ${darkTheme.colors.secondaryLight});
     color: #fff; box-shadow: 0 0 12px ${darkTheme.colors.glow};
-  ` : $v === 'primary' ? `
-    background: ${darkTheme.colors.primary}; color: #000;
   ` : `
     background: ${darkTheme.colors.surfaceLight}; color: ${darkTheme.colors.text};
     border: 1px solid ${darkTheme.colors.border};
@@ -55,8 +53,8 @@ const Input = styled.input`
   background: rgba(0,0,0,0.25); color: ${darkTheme.colors.text};
   font-size: 11px; font-family: 'JetBrains Mono', monospace;
 `;
-const MethodRow = styled.div` display: flex; gap: 6px; `;
-const MethodBtn = styled.button<{ $a?: boolean }>`
+const Row = styled.div` display: flex; gap: 6px; `;
+const ChoiceBtn = styled.button<{ $a?: boolean }>`
   flex: 1; padding: 8px; border-radius: 6px; cursor: pointer;
   border: 1px solid ${({ $a }) => $a ? darkTheme.colors.primary : darkTheme.colors.border};
   background: ${({ $a }) => $a ? darkTheme.colors.primary : 'transparent'};
@@ -64,8 +62,8 @@ const MethodBtn = styled.button<{ $a?: boolean }>`
   font-size: 11px; font-weight: 600;
   &:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
-const Status = styled.div<{ $tone: 'idle' | 'active' | 'done' }>`
-  padding: 10px; border-radius: 0 6px 6px 0; font-size: 11px;
+const StatusBox = styled.div<{ $tone: 'idle' | 'active' | 'done' }>`
+  padding: 10px; border-radius: 0 6px 6px 0; font-size: 11px; line-height: 1.6;
   border-left: 3px solid ${({ $tone }) =>
     $tone === 'done' ? darkTheme.colors.success :
     $tone === 'active' ? darkTheme.colors.primary : darkTheme.colors.border};
@@ -96,10 +94,11 @@ const Channel = styled.div`
   position: absolute; top: 50%; left: 146px; right: 146px;
   height: 1px; background: ${darkTheme.colors.border}; opacity: 0.4;
 `;
-const ChannelLabel = styled.div`
+const StageLabel = styled.div`
   position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
-  font-size: 10px; color: ${darkTheme.colors.textMuted};
+  font-size: 10px; color: ${darkTheme.colors.textMuted}; max-width: 80%;
   padding: 4px 10px; background: rgba(0,0,0,0.3); border-radius: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 `;
 
 const pulse = keyframes`
@@ -108,23 +107,24 @@ const pulse = keyframes`
 `;
 const PhaseBadge = styled.div<{ $phase: HttpPhase }>`
   position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
-  padding: 8px 20px; border-radius: 20px; font-size: 13px; font-weight: 700;
-  letter-spacing: 1px; z-index: 15; pointer-events: none;
+  padding: 8px 18px; border-radius: 20px; font-size: 12px; font-weight: 700;
+  z-index: 15; pointer-events: none; max-width: 78%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   animation: ${pulse} 2s ease-in-out infinite;
   background: ${({ $phase }) =>
     $phase === 'idle' ? 'rgba(255,255,255,0.06)' :
-    $phase === 'processing' ? 'rgba(234,179,8,0.15)' :
+    $phase === 'tls' ? 'rgba(52,211,153,0.15)' :
     $phase === 'done' ? 'rgba(34,197,94,0.15)' : 'rgba(0,212,255,0.15)'};
   color: ${({ $phase }) =>
     $phase === 'idle' ? darkTheme.colors.textMuted :
-    $phase === 'processing' ? darkTheme.colors.warning :
+    $phase === 'tls' ? '#34d399' :
     $phase === 'done' ? darkTheme.colors.success : darkTheme.colors.primary};
   border: 1px solid currentColor;
 `;
 const Packet = styled.div<{ $kind: 'request' | 'response' | 'tls' }>`
   position: absolute; top: 50%; transform: translate(-50%, -50%);
-  padding: 8px 14px; border-radius: 18px; z-index: 20; white-space: nowrap;
-  font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
+  padding: 7px 12px; border-radius: 16px; z-index: 20; white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;
   background: ${({ $kind }) => $kind === 'request'
     ? 'linear-gradient(135deg, #38bdf8, #0284c7)'
     : $kind === 'tls'
@@ -142,23 +142,28 @@ const Code = styled.pre`
   margin: 0; padding: 10px; border-radius: 8px; overflow: auto;
   background: rgba(0,0,0,0.3); border: 1px solid ${darkTheme.colors.border};
   font-family: 'JetBrains Mono', monospace; font-size: 10px; line-height: 1.6;
-  color: ${darkTheme.colors.textLight}; max-height: 240px; white-space: pre-wrap;
+  color: ${darkTheme.colors.textLight}; max-height: 220px; white-space: pre-wrap;
   word-break: break-all;
 `;
 const LogLine = styled.div`
   font-family: 'JetBrains Mono', monospace; font-size: 10px; line-height: 1.8;
   color: ${darkTheme.colors.textMuted};
 `;
+const StreamRow = styled.div` display: flex; flex-wrap: wrap; gap: 6px; `;
+const StreamChip = styled.button<{ $active?: boolean }>`
+  padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid ${({ $active }) => $active ? darkTheme.colors.primary : darkTheme.colors.border};
+  background: ${({ $active }) => $active ? 'rgba(0,212,255,0.15)' : 'transparent'};
+  color: ${({ $active }) => $active ? darkTheme.colors.primary : darkTheme.colors.textMuted};
+`;
 
-const phaseLabel = (phase: HttpPhase) => {
-  if (phase === 'client-hello') return '🔐 TLS：ClientHello';
-  if (phase === 'server-hello') return '🔐 TLS：ServerHello + 证书';
-  if (phase === 'client-finished') return '🔐 TLS：Finished';
-  if (phase === 'request') return '📤 发送请求';
-  if (phase === 'processing') return '⚙ 服务器处理中';
-  if (phase === 'response') return '📥 返回响应';
-  if (phase === 'done') return '✅ 完成';
-  return '待发送';
+const statusIcon = (status: StreamStatus) => {
+  if (status === 'requesting') return '→';
+  if (status === 'processing') return '⚙';
+  if (status === 'responding') return '←';
+  if (status === 'done') return '✓';
+  return '·';
 };
 
 const HttpVisualizer: React.FC = () => {
@@ -168,37 +173,22 @@ const HttpVisualizer: React.FC = () => {
   const [postBody, setPostBody] = useState('user=admin&pass=123');
   const [status, setStatus] = useState(200);
   const [secure, setSecure] = useState(false);
+  const [version, setVersion] = useState<HttpVersion>('http1');
   const flow = useHttpFlow(speed);
 
-  const requestText = useMemo(
-    () => (flow.request ? formatMessage(flow.request) : '（尚未发送）'),
-    [flow.request],
-  );
-  const responseText = useMemo(
-    () => (flow.response ? formatMessage(flow.response) : '（等待响应）'),
-    [flow.response],
-  );
+  const selected = flow.streams.find(stream => stream.id === flow.selectedStreamId);
+  const requestText = useMemo(() => {
+    const request = flow.requests[flow.selectedStreamId];
+    return request ? formatMessage(request) : '（尚未发送）';
+  }, [flow.requests, flow.selectedStreamId]);
+  const responseText = useMemo(() => {
+    const response = flow.responses[flow.selectedStreamId];
+    return response ? formatMessage(response) : '（等待响应）';
+  }, [flow.responses, flow.selectedStreamId]);
 
-  const tlsStep = TLS_STEPS.find(step => step.phase === flow.phase);
-  const onCanvas = Boolean(tlsStep) || flow.phase === 'request' || flow.phase === 'response';
-  const packetKind = tlsStep ? 'tls' : flow.phase === 'response' ? 'response' : 'request';
-  const toLeft = flow.phase === 'response' || tlsStep?.direction === 'to-client';
-  // 用 CSS calc 贴着两个端点盒子走，画布宽度变化时也不会飞进盒子里
-  const track = toLeft ? 1 - flow.progress : flow.progress;
-  const packetLeft = `calc(146px + (100% - 292px) * ${track})`;
-  const responseLabel = flow.response
-    ? flow.response.startLine.replace('HTTP/1.1 ', '')
-    : `${status} ${reasonPhrase(status)}`;
-  const packetLabel = tlsStep
-    ? tlsStep.label
-    : flow.phase === 'response'
-      ? responseLabel
-      : `${method} ${path}`;
-
-  const handshakeDone = secure && ['request', 'processing', 'response', 'done'].includes(flow.phase);
   const channelLabel = secure
-    ? (handshakeDone ? 'TLS 1.3 已加密 · keep-alive' : '正在建立 TLS 连接…')
-    : '已建立 TCP 连接 · keep-alive';
+    ? (flow.phase === 'tls' ? '正在建立 TLS 连接…' : 'TLS 1.3 已加密 · keep-alive')
+    : (version === 'http2' ? 'HTTP/2 · 单连接多流' : 'HTTP/1.1 · keep-alive');
 
   return (
     <Page>
@@ -211,42 +201,66 @@ const HttpVisualizer: React.FC = () => {
             <Btn
               $v="accent"
               disabled={flow.isSending}
-              onClick={() => flow.send(method, path, method === 'POST' ? postBody : '', status, secure)}
+              onClick={() => flow.send({
+                method,
+                path,
+                body: method === 'POST' ? postBody : '',
+                status,
+                secure,
+                version,
+              })}
             >
               📨 发送请求
             </Btn>
             <Btn disabled={flow.isSending} onClick={flow.reset}>重置</Btn>
 
             <FieldLabel>协议</FieldLabel>
-            <MethodRow>
+            <Row>
               {[
                 { label: 'HTTP', value: false },
                 { label: 'HTTPS', value: true },
               ].map(item => (
-                <MethodBtn
+                <ChoiceBtn
                   key={item.label}
                   $a={secure === item.value}
                   disabled={flow.isSending}
                   onClick={() => setSecure(item.value)}
                 >
                   {item.label}
-                </MethodBtn>
+                </ChoiceBtn>
               ))}
-            </MethodRow>
+            </Row>
+
+            <FieldLabel>版本</FieldLabel>
+            <Row>
+              {[
+                { label: 'HTTP/1.1', value: 'http1' as HttpVersion },
+                { label: 'HTTP/2', value: 'http2' as HttpVersion },
+              ].map(item => (
+                <ChoiceBtn
+                  key={item.value}
+                  $a={version === item.value}
+                  disabled={flow.isSending}
+                  onClick={() => setVersion(item.value)}
+                >
+                  {item.label}
+                </ChoiceBtn>
+              ))}
+            </Row>
 
             <FieldLabel>请求方法</FieldLabel>
-            <MethodRow>
+            <Row>
               {(['GET', 'POST'] as HttpMethod[]).map(item => (
-                <MethodBtn
+                <ChoiceBtn
                   key={item}
                   $a={method === item}
                   disabled={flow.isSending}
                   onClick={() => setMethod(item)}
                 >
                   {item}
-                </MethodBtn>
+                </ChoiceBtn>
               ))}
-            </MethodRow>
+            </Row>
 
             <FieldLabel>请求路径</FieldLabel>
             <Input
@@ -267,37 +281,37 @@ const HttpVisualizer: React.FC = () => {
             )}
 
             <FieldLabel>响应状态码</FieldLabel>
-            <MethodRow>
+            <Row>
               {[200, 404, 500].map(item => (
-                <MethodBtn
+                <ChoiceBtn
                   key={item}
                   $a={status === item}
                   disabled={flow.isSending}
                   onClick={() => setStatus(item)}
                 >
                   {item}
-                </MethodBtn>
+                </ChoiceBtn>
               ))}
-            </MethodRow>
+            </Row>
 
             <FieldLabel>速度</FieldLabel>
-            <MethodRow>
+            <Row>
               {[0.5, 1, 2].map(item => (
-                <MethodBtn key={item} $a={speed === item} onClick={() => setSpeed(item)}>
+                <ChoiceBtn key={item} $a={speed === item} onClick={() => setSpeed(item)}>
                   {item}x
-                </MethodBtn>
+                </ChoiceBtn>
               ))}
-            </MethodRow>
+            </Row>
 
-            <Status $tone={flow.phase === 'done' ? 'done' : flow.phase === 'idle' ? 'idle' : 'active'}>
-              {phaseLabel(flow.phase)}
-            </Status>
+            <StatusBox $tone={flow.phase === 'done' ? 'done' : flow.phase === 'idle' ? 'idle' : 'active'}>
+              {flow.stageLabel}
+            </StatusBox>
           </PanelC>
         </Panel>
 
         {/* ── 中间画布 ── */}
         <CanvasPanel data-testid="http-canvas">
-          <PhaseBadge $phase={flow.phase}>{phaseLabel(flow.phase)}</PhaseBadge>
+          <PhaseBadge $phase={flow.phase}>{flow.stageLabel}</PhaseBadge>
 
           <Endpoint $type="client">
             <EndpointTitle>🌐 浏览器</EndpointTitle>
@@ -306,27 +320,57 @@ const HttpVisualizer: React.FC = () => {
 
           <Endpoint $type="server">
             <EndpointTitle>🖥 服务器</EndpointTitle>
-            <EndpointHint>example.com<br />HTTP/1.1</EndpointHint>
+            <EndpointHint>example.com<br />{version === 'http2' ? 'HTTP/2' : 'HTTP/1.1'}</EndpointHint>
           </Endpoint>
 
           <Channel />
-          <ChannelLabel>{channelLabel}</ChannelLabel>
+          <StageLabel>{channelLabel}</StageLabel>
 
-          {onCanvas && (
-            <Packet $kind={packetKind} style={{ left: packetLeft }}>
-              {packetLabel}
-            </Packet>
-          )}
+          {flow.flights.map(flight => {
+            const toLeft = flight.direction === 'to-client';
+            const track = toLeft ? 1 - flight.progress : flight.progress;
+            // 每条流一条独立轨道，HTTP/2 并发时才看得出是多个包
+            const lane = flight.streamId ? (flight.streamId - 2) * 56 : 0;
+            return (
+              <Packet
+                key={flight.id}
+                $kind={flight.kind}
+                style={{
+                  left: `calc(146px + (100% - 292px) * ${track})`,
+                  top: `calc(50% + ${lane}px)`,
+                }}
+              >
+                {flight.streamId ? `${flight.streamId} · ` : ''}{flight.label}
+              </Packet>
+            );
+          })}
         </CanvasPanel>
 
         {/* ── 右侧详情 ── */}
         <Panel>
           <PanelH>📄 报文详情</PanelH>
           <PanelC>
-            <SectionTitle>请求{secure ? '（经 TLS 加密）' : ''}</SectionTitle>
+            <SectionTitle>流（stream）</SectionTitle>
+            <StreamRow>
+              {flow.streams.length === 0
+                ? <LogLine>（尚未发送）</LogLine>
+                : flow.streams.map(stream => (
+                  <StreamChip
+                    key={stream.id}
+                    $active={flow.selectedStreamId === stream.id}
+                    onClick={() => flow.selectStream(stream.id)}
+                  >
+                    {statusIcon(stream.status)} {stream.id} · {stream.path}
+                    {stream.responseStatus ? ` · ${stream.responseStatus}` : ''}
+                  </StreamChip>
+                ))}
+            </StreamRow>
+
+            <SectionTitle>请求{selected ? `（流 ${selected.id}${secure ? '，经 TLS 加密' : ''}）` : ''}</SectionTitle>
             <Code>{requestText}</Code>
             <SectionTitle>响应</SectionTitle>
             <Code>{responseText}</Code>
+
             <SectionTitle>事件日志</SectionTitle>
             {flow.log.length === 0
               ? <LogLine>（点击「发送请求」开始）</LogLine>

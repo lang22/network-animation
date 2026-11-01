@@ -6,24 +6,29 @@ const HOST = 'example.com';
 /** TLS 1.3 简化握手的三条消息（ServerHello/证书/CertificateVerify/Finished 合成一条） */
 export const TLS_STEPS: TlsStep[] = [
   {
-    phase: 'client-hello',
     label: 'ClientHello',
     direction: 'to-server',
     detail: 'TLS 1.3 · 密码套件列表 · SNI=example.com · key_share',
   },
   {
-    phase: 'server-hello',
     label: 'ServerHello + 证书',
     direction: 'to-client',
     detail: '选定密码套件 · 服务器证书 · CertificateVerify · Finished',
   },
   {
-    phase: 'client-finished',
     label: 'Finished',
     direction: 'to-server',
     detail: '客户端校验证书后发送 Finished，握手完成，之后的数据全程加密',
   },
 ];
+
+/** 除了用户填的路径，额外抓取的两个资源（用来演示串行 vs 多路复用） */
+export const EXTRA_RESOURCES = ['/style.css', '/app.js'];
+
+/** 一次请求涉及哪些资源：GET 抓三个资源，POST 只有一个 */
+export function resourcesFor(path: string, method: HttpMethod): string[] {
+  return method === 'POST' ? [path] : [path, ...EXTRA_RESOURCES];
+}
 
 /** UTF-8 字节长度（不依赖 TextEncoder，jsdom 环境里没有它） */
 export function utf8Length(text: string): number {

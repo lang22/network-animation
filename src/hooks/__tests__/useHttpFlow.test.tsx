@@ -21,91 +21,104 @@ const advance = async (ms: number, step = 20) => {
   }
 };
 
+const runUntilDone = async (result: { current: { phase: string } }, limit = 400) => {
+  for (let i = 0; i < limit && result.current.phase !== 'done'; i += 1) {
+    await act(async () => { jest.advanceTimersByTime(20); });
+  }
+};
+
 describe('useHttpFlow', () => {
-  it('runs request → processing → response → done', async () => {
+  it('HTTP/1.1 依次加载三个资源', async () => {
     const { result } = renderHook(() => useHttpFlow(10));
 
-    act(() => { void result.current.send('GET', '/index.html'); });
-    expect(result.current.phase).toBe('request');
+    act(() => { void result.current.send({ path: '/index.html', version: 'http1' }); });
 
-    let sawProcessing = false;
-    let sawResponse = false;
-    for (let i = 0; i < 60; i += 1) {
-      await act(async () => { jest.advanceTimersByTime(20); });
-      if (result.current.phase === 'processing') sawProcessing = true;
-      if (result.current.phase === 'response') sawResponse = true;
-    }
+    expect(result.current.phase).toBe('transfer');
+    expect(result.current.streams).toHaveLength(3);
+    expect(result.current.stageLabel).toContain('HTTP/1.1');
 
-    expect(sawProcessing).toBe(true);
-    expect(sawResponse).toBe(true);
+    await runUntilDone(result);
+
     expect(result.current.phase).toBe('done');
-    expect(result.current.response?.startLine).toBe('HTTP/1.1 200 OK');
-    expect(result.current.request?.startLine).toBe('GET /index.html HTTP/1.1');
-    expect(result.current.log.length).toBeGreaterThanOrEqual(4);
-    expect(result.current.isSending).toBe(false);
+    expect(result.current.streams.every(stream => stream.status === 'done')).toBe(true);
+    expect(Object.keys(result.current.responses)).toHaveLength(3);
+    expect(result.current.log.some(entry => entry.text.includes('HTTP/1.1 串行'))).toBe(true);
   });
 
-  it('walks through the TLS handshake before an HTTPS request', async () => {
+  it('HTTP/2 三个请求同时在飞', async () => {
     const { result } = renderHook(() => useHttpFlow(10));
 
-    act(() => { void result.current.send('GET', '/secure', '', 200, true); });
-    expect(result.current.phase).toBe('client-hello');
+    act(() => { void result.current.send({ path: '/index.html', version: 'http2' }); });
+
+    await act(async () => { jest.advanceTimersByTime(40); });
+
+    const requestFlights = result.current.flights.filter(flight => flight.kind === 'request');
+    expect(requestFlights).toHaveLength(3);
+    expect(result.current.log.some(entry => entry.text.includes('HTTP/2 多路复用'))).toBe(true);
+
+    await runUntilDone(result);
+    expect(result.current.phase).toBe('done');
+    expect(result.current.streams.every(stream => stream.status === 'done')).toBe(true);
+  });
+
+  it('HTTPS 先完成 TLS 握手再传输', async () => {
+    const { result } = renderHook(() => useHttpFlow(10));
+
+    act(() => { void result.current.send({ secure: true }); });
+    expect(result.current.phase).toBe('tls');
 
     const seen = new Set<string>();
-    for (let i = 0; i < 80; i += 1) {
+    for (let i = 0; i < 400 && result.current.phase !== 'done'; i += 1) {
       await act(async () => { jest.advanceTimersByTime(20); });
       seen.add(result.current.phase);
     }
 
-    expect(seen.has('server-hello')).toBe(true);
-    expect(seen.has('client-finished')).toBe(true);
-    expect(seen.has('request')).toBe(true);
-    expect(result.current.phase).toBe('done');
+    expect(seen.has('transfer')).toBe(true);
     expect(result.current.log.some(entry => entry.text.includes('ClientHello'))).toBe(true);
     expect(result.current.log.some(entry => entry.text.includes('TLS 握手完成'))).toBe(true);
-    expect(result.current.log.some(entry => entry.text.includes('（已加密）'))).toBe(true);
+    expect(result.current.phase).toBe('done');
   });
 
-  it('ignores a second send while one is running', async () => {
+  it('可以切换查看不同流', async () => {
     const { result } = renderHook(() => useHttpFlow(10));
 
-    act(() => { void result.current.send('GET', '/a'); });
-    act(() => { void result.current.send('GET', '/b'); });
+    act(() => { void result.current.send({ version: 'http2' }); });
+    await runUntilDone(result);
 
-    expect(result.current.request?.startLine).toBe('GET /a HTTP/1.1');
+    act(() => { result.current.selectStream(2); });
+    expect(result.current.selectedStreamId).toBe(2);
+    expect(result.current.requests[2]?.startLine).toBe('GET /style.css HTTP/1.1');
   });
 
-  it('uses the selected status code for the response', async () => {
+  it('发送过程中忽略重复发送', async () => {
     const { result } = renderHook(() => useHttpFlow(10));
 
-    act(() => { void result.current.send('GET', '/missing', '', 404); });
-    await advance(600);
+    act(() => { void result.current.send({ path: '/a' }); });
+    act(() => { void result.current.send({ path: '/b' }); });
 
-    expect(result.current.response?.startLine).toBe('HTTP/1.1 404 Not Found');
-    expect(result.current.log.some(entry => entry.text.includes('404'))).toBe(true);
+    expect(result.current.streams[0].path).toBe('/a');
   });
 
-  it('sends the POST body with a matching content length', async () => {
+  it('reset 清空所有状态', async () => {
     const { result } = renderHook(() => useHttpFlow(10));
 
-    act(() => { void result.current.send('POST', '/login', 'user=admin'); });
-
-    expect(result.current.request?.body).toBe('user=admin');
-    expect(result.current.request?.headers).toEqual(expect.arrayContaining([
-      ['Content-Length', '10'],
-    ]));
-  });
-
-  it('reset clears the exchange', async () => {
-    const { result } = renderHook(() => useHttpFlow(10));
-
-    act(() => { void result.current.send('POST', '/login'); });
+    act(() => { void result.current.send({}); });
     await advance(100);
     act(() => { result.current.reset(); });
 
     expect(result.current.phase).toBe('idle');
-    expect(result.current.request).toBeNull();
-    expect(result.current.response).toBeNull();
-    expect(result.current.progress).toBe(0);
+    expect(result.current.streams).toHaveLength(0);
+    expect(result.current.flights).toHaveLength(0);
+    expect(result.current.log).toHaveLength(0);
+    expect(result.current.requests).toEqual({});
+  });
+
+  it('POST 只有一条流并带请求体', async () => {
+    const { result } = renderHook(() => useHttpFlow(10));
+
+    act(() => { void result.current.send({ method: 'POST', path: '/login', body: 'user=admin' }); });
+
+    expect(result.current.streams).toHaveLength(1);
+    expect(result.current.requests[1]?.body).toBe('user=admin');
   });
 });
