@@ -45,12 +45,14 @@
 ### HTTP 协议模拟器 (`/protocol/http`)
 
 1. **请求/响应动画** — 请求包从浏览器飞向服务器，服务器处理片刻后响应包飞回；小球用 CSS `calc` 贴着端点盒子飞，窄窗口也不会钻进去
-2. **HTTPS / TLS 1.3 握手** — 切到 HTTPS 后先走 ClientHello → ServerHello + 证书 → Finished 三步，通道标签变「TLS 1.3 已加密」，请求报文标注「经 TLS 加密」
-3. **原始报文展示** — 右侧按 HTTP/1.1 原文展示起始行、头部、正文（响应含 HTML body）
-4. **GET / POST 切换** — POST 可编辑请求体，`Content-Type` 与 `Content-Length`（按 UTF-8 字节数）自动补全
-5. **响应状态码** — 200 / 404 / 500 可切换，报文正文随状态码变化
-6. **路径可编辑** — 默认 `/index.html`，可改成任意路径再发送
-7. **事件日志 + 速度** — 0.5x / 1x / 2x，日志记录握手、请求发出、服务器处理、响应返回、渲染完成
+2. **HTTP/1.1 vs HTTP/2** — 同一个页面加载三个资源（路径 + `/style.css` + `/app.js`）：HTTP/1.1 串行、HTTP/2 三流并发，每条流独立轨道和流 id
+3. **HTTPS / TLS 1.3 握手** — 切到 HTTPS 后先走 ClientHello → ServerHello + 证书 → Finished 三步，通道标签变「TLS 1.3 已加密」
+4. **缓存与条件请求** — 响应带 `ETag` / `Cache-Control`；完成后可发「再次请求」，带 `If-None-Match` 拿到 `304 Not Modified`（无正文）
+5. **自定义响应头** — 左栏可填多行 `Name: Value`，同名覆盖、新头追加
+6. **原始报文展示** — 右侧按 HTTP/1.1 原文展示起始行、头部、正文；流列表可切换查看任意流的报文
+7. **GET / POST 切换** — POST 可编辑请求体，`Content-Type` 与 `Content-Length`（按 UTF-8 字节数）自动补全
+8. **响应状态码** — 200 / 404 / 500 可切换，报文正文随状态码变化
+9. **事件日志 + 速度** — 0.5x / 1x / 2x，日志记录握手、请求发出、服务器处理、响应返回
 
 ### 动画系统
 
@@ -167,7 +169,30 @@ TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支�
 2. **三条握手消息** — `ClientHello`（TLS 1.3 / 密码套件 / SNI / key_share）→ `ServerHello + 证书`（选定套件 / 证书 / CertificateVerify / Finished）→ `Finished`，每条都带方向与说明进事件日志
 3. **状态与视觉** — 握手期间通道标签显示「正在建立 TLS 连接…」，完成后变「TLS 1.3 已加密」；握手包用绿色区分，请求区标题标注「经 TLS 加密」
 4. **实现** — `TLS_STEPS` 常量描述三步，`useHttpFlow.send(method, path, body, status, secure)` 在 secure 时先循环跑握手，再进入原有请求流程
-5. **测试** — hook 增加 HTTPS 全流程用例，页面增加「选 HTTPS 后先走握手」（共 78 个）
+5. **测试** — hook 增加 HTTPS 全流程用例，页面增加「选 HTTPS 后先走握手」
+
+### HTTP/2 多路复用
+
+1. **动画模型重构** — 从「单个 progress」改成 `flights` 数组 + 一个 rAF 循环：每帧推进所有飞行中的包，到终点即 resolve 并从画布移除
+2. **版本选择** — 同一个页面加载三个资源（用户路径 + `/style.css` + `/app.js`）：HTTP/1.1 依次请求，HTTP/2 三条流同时发出
+3. **流的可视化** — 每条流分配独立轨道，包上带流 id；右侧流列表可点击切换查看任意流的请求/响应
+4. **POST 例外** — POST 只有一条流（不会把同一个表单提交三次）
+
+### 缓存与条件请求
+
+1. **缓存头** — 200/304 响应带 `ETag: "6f-5e8a1c"` 与 `Cache-Control: max-age=60`；错误响应 `no-store`
+2. **再次请求** — 首次加载完成后「🔄 再次请求（带 If-None-Match）」按钮可用，请求带上上次的 ETag
+3. **304 处理** — 服务器返回 `304 Not Modified`，无正文、无 Content-Length，界面提示「304 无正文，复用本地缓存」
+
+### 自定义响应头
+
+1. **多行编辑** — 左栏「自定义响应头」文本域，每行 `Name: Value`
+2. **覆盖规则** — 同名头（大小写不敏感）覆盖默认值，新头追加；默认填了 `X-Cache: HIT` 作为示例
+
+### 验证
+
+- headless 复测：HTTP/2 三流并发（三个包分别在不同轨道）、自定义头出现在响应里、`再次请求` 携带 `If-None-Match` 并拿到 304（无正文提示）
+- 测试共 88 个（service 12 / hook 9 / 页面 8 等）
 
 ## 最近修改 (2026-10-31)
 
@@ -289,7 +314,7 @@ TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支�
 
 ### 中优先级
 
-1. **HTTP/2 多路复用** — 现在 HTTPS 已经能演示 TLS 握手；下一步是在一条连接上并发多个 stream，对比 HTTP/1.1 的队头阻塞
+1. **HTTP/2 服务器推送与流优先级** — 多路复用已经做完；下一步可以做 push promise（服务器主动推资源）和依赖树优先级
 2. **多种关闭场景** — 同时关闭/服务器主动关闭/半关闭
 3. **更细的单步** — 现在是「一次一轮 RTT」，还可以细到逐 ACK / 逐重传事件
 
@@ -334,7 +359,7 @@ TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支�
 npm install          # 安装依赖
 npm run dev          # 开发服务器 http://localhost:3000
 npm run build        # 生产构建
-npm test             # 运行测试 (78 tests)
+npm test             # 运行测试 (88 tests)
 npm run lint         # ESLint 检查
 npm run test:coverage # 覆盖率（逻辑层门槛）
 npm run verify:ui    # 需要先 npm start：截图验收布局与快重传

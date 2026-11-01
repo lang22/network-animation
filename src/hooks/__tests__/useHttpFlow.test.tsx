@@ -121,4 +121,33 @@ describe('useHttpFlow', () => {
     expect(result.current.streams).toHaveLength(1);
     expect(result.current.requests[1]?.body).toBe('user=admin');
   });
+
+  it('把自定义响应头写进响应', async () => {
+    const { result } = renderHook(() => useHttpFlow(10));
+
+    act(() => { void result.current.send({ responseHeaders: [['X-Cache', 'HIT']] }); });
+    await runUntilDone(result);
+
+    expect(result.current.responses[1]?.headers).toEqual(expect.arrayContaining([['X-Cache', 'HIT']]));
+  });
+
+  it('缓存校验带 If-None-Match 并拿到 304', async () => {
+    const { result } = renderHook(() => useHttpFlow(10));
+
+    act(() => { void result.current.send({ version: 'http2' }); });
+    await runUntilDone(result);
+    expect(result.current.phase).toBe('done');
+
+    act(() => { void result.current.sendConditional(); });
+    await runUntilDone(result);
+
+    expect(result.current.requests[1]?.headers).toEqual(expect.arrayContaining([
+      ['If-None-Match', '"6f-5e8a1c"'],
+    ]));
+    expect(result.current.responses[1]?.startLine).toBe('HTTP/1.1 304 Not Modified');
+    expect(result.current.responses[1]?.body).toBe('');
+    expect(result.current.streams[0].responseStatus).toBe(304);
+    expect(result.current.log.some(entry => entry.text.includes('304'))).toBe(true);
+    expect(result.current.phase).toBe('done');
+  });
 });

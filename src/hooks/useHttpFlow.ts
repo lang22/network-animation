@@ -14,6 +14,7 @@ import {
   reasonPhrase,
   resourcesFor,
   TLS_STEPS,
+  ETAG_VALUE,
   DEFAULT_PATH,
 } from '@/services/protocols/httpService';
 
@@ -30,6 +31,8 @@ export interface HttpSendOptions {
   status?: number;
   secure?: boolean;
   version?: HttpVersion;
+  /** 追加/覆盖到响应里的自定义头 */
+  responseHeaders?: Array<[string, string]>;
 }
 
 interface FlightMeta {
@@ -155,6 +158,7 @@ export function useHttpFlow(speed: number = 1) {
       status = 200,
       secure = false,
       version = 'http1',
+      responseHeaders = [],
     } = options;
 
     if (sendingRef.current) return;
@@ -231,7 +235,7 @@ export function useHttpFlow(speed: number = 1) {
       setStreams(prev => prev.map(item => (item.id === stream.id ? { ...item, status: 'processing' } : item)));
       if (!await wait(PROCESS_MS / speedRef.current, token) || token !== tokenRef.current) return;
 
-      const response = buildResponse(status);
+      const response = buildResponse(status, undefined, responseHeaders);
       setResponses(prev => ({ ...prev, [stream.id]: response }));
       setStreams(prev => prev.map(item => (item.id === stream.id
         ? { ...item, status: 'responding', responseStatus: status }
@@ -274,6 +278,65 @@ export function useHttpFlow(speed: number = 1) {
     setSelectedStreamId(id);
   }, []);
 
+  /** 缓存校验：拿上一次响应的 ETag 发 If-None-Match，服务器回 304 */
+  const sendConditional = useCallback(async () => {
+    const previous = responses[1];
+    const streamPath = streams[0]?.path ?? DEFAULT_PATH;
+    if (sendingRef.current || !previous || !previous.startLine.includes('200')) return;
+
+    const etag = previous.headers.find(([name]) => name.toLowerCase() === 'etag')?.[1] ?? ETAG_VALUE;
+
+    sendingRef.current = true;
+    tokenRef.current += 1;
+    const token = tokenRef.current;
+
+    setIsSending(true);
+    setLog([]);
+    setFlights([]);
+    setSelectedStreamId(1);
+    setStreams([{ id: 1, path: streamPath, status: 'pending' }]);
+
+    setPhase('transfer');
+    setStageLabel('缓存校验：携带 If-None-Match');
+    appendLog(`流 1：GET ${streamPath} · If-None-Match: ${etag}`);
+
+    const request = buildRequest('GET', streamPath, '', [['If-None-Match', etag]]);
+    setRequests({ 1: request });
+    setStreams([{ id: 1, path: streamPath, status: 'requesting' }]);
+
+    await fly({
+      id: `req-cond-${Date.now()}`,
+      kind: 'request',
+      label: `GET ${streamPath}`,
+      streamId: 1,
+      direction: 'to-server',
+    }, REQUEST_MS / speedRef.current);
+    if (token !== tokenRef.current) return;
+
+    setStreams([{ id: 1, path: streamPath, status: 'processing' }]);
+    if (!await wait(PROCESS_MS / speedRef.current, token) || token !== tokenRef.current) return;
+
+    const response = buildResponse(304);
+    setResponses({ 1: response });
+    setStreams([{ id: 1, path: streamPath, status: 'responding', responseStatus: 304 }]);
+    appendLog('服务器返回 304 Not Modified，命中缓存，不再传正文');
+    setStageLabel('✅ 命中缓存（304）');
+
+    await fly({
+      id: `res-cond-${Date.now()}`,
+      kind: 'response',
+      label: '304 Not Modified',
+      streamId: 1,
+      direction: 'to-client',
+    }, RESPONSE_MS / speedRef.current);
+    if (token !== tokenRef.current) return;
+
+    setStreams([{ id: 1, path: streamPath, status: 'done', responseStatus: 304 }]);
+    setPhase('done');
+    setIsSending(false);
+    sendingRef.current = false;
+  }, [appendLog, fly, wait, responses, streams]);
+
   const reset = useCallback(() => {
     tokenRef.current += 1;
     sendingRef.current = false;
@@ -299,6 +362,7 @@ export function useHttpFlow(speed: number = 1) {
     log,
     isSending,
     send,
+    sendConditional,
     selectStream,
     reset,
   };

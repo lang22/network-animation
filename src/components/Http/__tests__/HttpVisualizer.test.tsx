@@ -91,4 +91,44 @@ describe('HttpVisualizer', () => {
 
     expect(screen.getAllByText(/HTTP\/1\.1 404 Not Found/).length).toBeGreaterThan(0);
   });
+
+  it('自定义响应头会出现在响应报文里', async () => {
+    renderPage();
+
+    expect(screen.getByDisplayValue('X-Cache: HIT')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'HTTP/2' }));
+    fireEvent.click(screen.getByText('📨 发送请求'));
+
+    for (let i = 0; i < 60; i += 1) {
+      await act(async () => { jest.advanceTimersByTime(100); });
+      if (screen.queryAllByText(/X-Cache: HIT/).length > 0) break;
+    }
+
+    expect(screen.getAllByText(/X-Cache: HIT/).length).toBeGreaterThan(0);
+  });
+
+  it('完成后可以发起缓存校验并拿到 304', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'HTTP/2' }));
+    fireEvent.click(screen.getByText('📨 发送请求'));
+
+    const conditionalButton = screen.getByRole('button', { name: /再次请求/ }) as HTMLButtonElement;
+    expect(conditionalButton.disabled).toBe(true);
+
+    for (let i = 0; i < 90 && conditionalButton.disabled; i += 1) {
+      await act(async () => { jest.advanceTimersByTime(100); });
+    }
+    expect(conditionalButton.disabled).toBe(false);
+
+    fireEvent.click(conditionalButton);
+    for (let i = 0; i < 60; i += 1) {
+      await act(async () => { jest.advanceTimersByTime(100); });
+      if (screen.queryAllByText(/HTTP\/1\.1 304 Not Modified/).length > 0) break;
+    }
+
+    expect(screen.getAllByText(/HTTP\/1\.1 304 Not Modified/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/304 无正文/)).toBeInTheDocument();
+  });
 });

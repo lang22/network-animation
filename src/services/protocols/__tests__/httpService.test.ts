@@ -67,4 +67,37 @@ describe('httpService', () => {
     expect(response.body).toBe('ok');
     expect(response.headers).toEqual(expect.arrayContaining([['Content-Length', '2']]));
   });
+
+  it('adds cache headers to successful and 304 responses', () => {
+    const ok = buildResponse(200);
+    const notModified = buildResponse(304);
+
+    expect(ok.headers).toEqual(expect.arrayContaining([['ETag', '"6f-5e8a1c"'], ['Cache-Control', 'max-age=60']]));
+    expect(notModified.startLine).toBe('HTTP/1.1 304 Not Modified');
+    expect(notModified.body).toBe('');
+    expect(notModified.headers).toEqual(expect.arrayContaining([['ETag', '"6f-5e8a1c"']]));
+    expect(notModified.headers.some(([name]) => name === 'Content-Length')).toBe(false);
+  });
+
+  it('does not cache error responses', () => {
+    expect(buildResponse(500).headers).toEqual(expect.arrayContaining([['Cache-Control', 'no-store']]));
+  });
+
+  it('appends extra request headers such as If-None-Match', () => {
+    const request = buildRequest('GET', '/index.html', '', [['If-None-Match', '"6f-5e8a1c"']]);
+
+    expect(request.headers).toEqual(expect.arrayContaining([['If-None-Match', '"6f-5e8a1c"']]));
+  });
+
+  it('appends custom response headers and overrides existing ones', () => {
+    const response = buildResponse(200, undefined, [
+      ['X-Cache', 'HIT'],
+      ['Content-Type', 'application/json'],
+    ]);
+
+    expect(response.headers).toEqual(expect.arrayContaining([['X-Cache', 'HIT']]));
+    expect(response.headers.filter(([name]) => name === 'Content-Type')).toEqual([
+      ['Content-Type', 'application/json'],
+    ]);
+  });
 });

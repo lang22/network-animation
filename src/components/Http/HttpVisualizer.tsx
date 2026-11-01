@@ -53,6 +53,12 @@ const Input = styled.input`
   background: rgba(0,0,0,0.25); color: ${darkTheme.colors.text};
   font-size: 11px; font-family: 'JetBrains Mono', monospace;
 `;
+const TextArea = styled.textarea`
+  width: 100%; box-sizing: border-box; padding: 8px 10px; min-height: 54px; resize: vertical;
+  border-radius: 6px; border: 1px solid ${darkTheme.colors.border};
+  background: rgba(0,0,0,0.25); color: ${darkTheme.colors.text};
+  font-size: 10px; font-family: 'JetBrains Mono', monospace; line-height: 1.5;
+`;
 const Row = styled.div` display: flex; gap: 6px; `;
 const ChoiceBtn = styled.button<{ $a?: boolean }>`
   flex: 1; padding: 8px; border-radius: 6px; cursor: pointer;
@@ -166,6 +172,14 @@ const statusIcon = (status: StreamStatus) => {
   return '·';
 };
 
+/** 把「Name: Value」多行文本转成头部数组 */
+const parseHeaders = (text: string): Array<[string, string]> => text
+  .split('\n')
+  .map(line => line.split(':'))
+  .filter(parts => parts.length >= 2)
+  .map(([name, ...rest]) => [name.trim(), rest.join(':').trim()] as [string, string])
+  .filter(([name, value]) => name.length > 0 && value.length > 0);
+
 const HttpVisualizer: React.FC = () => {
   const [speed, setSpeed] = useState(1);
   const [method, setMethod] = useState<HttpMethod>('GET');
@@ -174,6 +188,7 @@ const HttpVisualizer: React.FC = () => {
   const [status, setStatus] = useState(200);
   const [secure, setSecure] = useState(false);
   const [version, setVersion] = useState<HttpVersion>('http1');
+  const [customHeaders, setCustomHeaders] = useState('X-Cache: HIT');
   const flow = useHttpFlow(speed);
 
   const selected = flow.streams.find(stream => stream.id === flow.selectedStreamId);
@@ -189,6 +204,10 @@ const HttpVisualizer: React.FC = () => {
   const channelLabel = secure
     ? (flow.phase === 'tls' ? '正在建立 TLS 连接…' : 'TLS 1.3 已加密 · keep-alive')
     : (version === 'http2' ? 'HTTP/2 · 单连接多流' : 'HTTP/1.1 · keep-alive');
+
+  const selectedResponse = flow.responses[flow.selectedStreamId];
+  const canConditional = flow.phase === 'done'
+    && Boolean(flow.responses[1]?.startLine.includes('200'));
 
   return (
     <Page>
@@ -208,9 +227,16 @@ const HttpVisualizer: React.FC = () => {
                 status,
                 secure,
                 version,
+                responseHeaders: parseHeaders(customHeaders),
               })}
             >
               📨 发送请求
+            </Btn>
+            <Btn
+              disabled={!canConditional || flow.isSending}
+              onClick={flow.sendConditional}
+            >
+              🔄 再次请求（带 If-None-Match）
             </Btn>
             <Btn disabled={flow.isSending} onClick={flow.reset}>重置</Btn>
 
@@ -294,6 +320,14 @@ const HttpVisualizer: React.FC = () => {
               ))}
             </Row>
 
+            <FieldLabel>自定义响应头（每行 Name: Value）</FieldLabel>
+            <TextArea
+              value={customHeaders}
+              disabled={flow.isSending}
+              placeholder="X-Cache: HIT"
+              onChange={event => setCustomHeaders(event.target.value)}
+            />
+
             <FieldLabel>速度</FieldLabel>
             <Row>
               {[0.5, 1, 2].map(item => (
@@ -368,7 +402,7 @@ const HttpVisualizer: React.FC = () => {
 
             <SectionTitle>请求{selected ? `（流 ${selected.id}${secure ? '，经 TLS 加密' : ''}）` : ''}</SectionTitle>
             <Code>{requestText}</Code>
-            <SectionTitle>响应</SectionTitle>
+            <SectionTitle>响应{selectedResponse?.startLine.includes('304') ? '（304 无正文，复用本地缓存）' : ''}</SectionTitle>
             <Code>{responseText}</Code>
 
             <SectionTitle>事件日志</SectionTitle>

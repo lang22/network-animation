@@ -3,6 +3,9 @@ import { HttpMessage, HttpMethod, TlsStep } from '@/types/httpTypes';
 
 const HOST = 'example.com';
 
+/** 服务器资源的 ETag：条件请求用它来判断缓存是否还有效 */
+export const ETAG_VALUE = '"6f-5e8a1c"';
+
 /** TLS 1.3 简化握手的三条消息（ServerHello/证书/CertificateVerify/Finished 合成一条） */
 export const TLS_STEPS: TlsStep[] = [
   {
@@ -48,6 +51,7 @@ export function buildRequest(
   method: HttpMethod,
   path: string,
   body: string = '',
+  extraHeaders: Array<[string, string]> = [],
 ): HttpMessage {
   const headers: Array<[string, string]> = [
     ['Host', HOST],
@@ -61,6 +65,8 @@ export function buildRequest(
     headers.push(['Content-Length', String(utf8Length(body))]);
   }
 
+  extraHeaders.forEach(header => headers.push(header));
+
   return {
     startLine: `${method} ${path} HTTP/1.1`,
     headers,
@@ -69,19 +75,45 @@ export function buildRequest(
 }
 
 /** 构造一个 HTTP/1.1 响应；正文不传时按状态码给默认页 */
-export function buildResponse(status: number = 200, body?: string): HttpMessage {
-  const content = body ?? defaultBodyFor(status);
-  const bodyBytes = utf8Length(content);
+export function buildResponse(
+  status: number = 200,
+  body?: string,
+  extraHeaders: Array<[string, string]> = [],
+): HttpMessage {
+  const notModified = status === 304;
+  const content = notModified ? '' : (body ?? defaultBodyFor(status));
+
+  const headers: Array<[string, string]> = [
+    ['Date', 'Wed, 01 Nov 2026 00:00:00 GMT'],
+    ['Server', 'nginx/1.25.3'],
+  ];
+
+  if (!notModified) {
+    headers.push(['Content-Type', 'text/html; charset=utf-8']);
+    headers.push(['Content-Length', String(utf8Length(content))]);
+  }
+
+  // 304 与 2xx 都带缓存头；错误响应不缓存
+  if (notModified) {
+    headers.push(['ETag', ETAG_VALUE], ['Cache-Control', 'max-age=60']);
+  } else if (status === 200) {
+    headers.push(['ETag', ETAG_VALUE], ['Cache-Control', 'max-age=60']);
+  } else {
+    headers.push(['Cache-Control', 'no-store']);
+  }
+
+  headers.push(['Connection', 'keep-alive']);
+
+  // 自定义头：同名（大小写不敏感）覆盖，否则追加
+  extraHeaders.forEach(([name, value]) => {
+    const index = headers.findIndex(([existing]) => existing.toLowerCase() === name.toLowerCase());
+    if (index >= 0) headers[index] = [name, value];
+    else headers.push([name, value]);
+  });
 
   return {
     startLine: `HTTP/1.1 ${status} ${reasonPhrase(status)}`,
-    headers: [
-      ['Date', 'Wed, 01 Nov 2026 00:00:00 GMT'],
-      ['Server', 'nginx/1.25.3'],
-      ['Content-Type', 'text/html; charset=utf-8'],
-      ['Content-Length', String(bodyBytes)],
-      ['Connection', 'keep-alive'],
-    ],
+    headers,
     body: content,
   };
 }
@@ -100,6 +132,7 @@ export function defaultBodyFor(status: number): string {
 /** 状态码对应的原因短语 */
 export function reasonPhrase(status: number): string {
   if (status === 200) return 'OK';
+  if (status === 304) return 'Not Modified';
   if (status === 404) return 'Not Found';
   if (status === 500) return 'Internal Server Error';
   return 'Unknown';
