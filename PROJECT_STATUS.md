@@ -45,11 +45,12 @@
 ### HTTP 协议模拟器 (`/protocol/http`)
 
 1. **请求/响应动画** — 请求包从浏览器飞向服务器，服务器处理片刻后响应包飞回；小球用 CSS `calc` 贴着端点盒子飞，窄窗口也不会钻进去
-2. **原始报文展示** — 右侧按 HTTP/1.1 原文展示起始行、头部、正文（响应含 HTML body）
-3. **GET / POST 切换** — POST 可编辑请求体，`Content-Type` 与 `Content-Length`（按 UTF-8 字节数）自动补全
-4. **响应状态码** — 200 / 404 / 500 可切换，报文正文随状态码变化
-5. **路径可编辑** — 默认 `/index.html`，可改成任意路径再发送
-6. **事件日志 + 速度** — 0.5x / 1x / 2x，日志记录请求发出、服务器处理、响应返回、渲染完成
+2. **HTTPS / TLS 1.3 握手** — 切到 HTTPS 后先走 ClientHello → ServerHello + 证书 → Finished 三步，通道标签变「TLS 1.3 已加密」，请求报文标注「经 TLS 加密」
+3. **原始报文展示** — 右侧按 HTTP/1.1 原文展示起始行、头部、正文（响应含 HTML body）
+4. **GET / POST 切换** — POST 可编辑请求体，`Content-Type` 与 `Content-Length`（按 UTF-8 字节数）自动补全
+5. **响应状态码** — 200 / 404 / 500 可切换，报文正文随状态码变化
+6. **路径可编辑** — 默认 `/index.html`，可改成任意路径再发送
+7. **事件日志 + 速度** — 0.5x / 1x / 2x，日志记录握手、请求发出、服务器处理、响应返回、渲染完成
 
 ### 动画系统
 
@@ -159,6 +160,14 @@ TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支�
 3. **POST 没有请求体** — 加请求体输入框，默认 `user=admin&pass=123`，`Content-Length` 按 UTF-8 字节数算（19）
 4. **重置时飞行动画的 Promise 悬挂** — `fly` 增加取消钩子，重置/卸载时 resolve(false)
 5. **测试** — service 8、hook 5、页面 4（共 76 个）；headless 复测：1100px 窄窗口小球仍在两盒之间、404 报文与 POST 头部正确
+
+### HTTPS / TLS 1.3 握手
+
+1. **协议切换** — 左栏新增 HTTP / HTTPS 选择；HTTPS 会在 HTTP 请求前先跑三步握手
+2. **三条握手消息** — `ClientHello`（TLS 1.3 / 密码套件 / SNI / key_share）→ `ServerHello + 证书`（选定套件 / 证书 / CertificateVerify / Finished）→ `Finished`，每条都带方向与说明进事件日志
+3. **状态与视觉** — 握手期间通道标签显示「正在建立 TLS 连接…」，完成后变「TLS 1.3 已加密」；握手包用绿色区分，请求区标题标注「经 TLS 加密」
+4. **实现** — `TLS_STEPS` 常量描述三步，`useHttpFlow.send(method, path, body, status, secure)` 在 secure 时先循环跑握手，再进入原有请求流程
+5. **测试** — hook 增加 HTTPS 全流程用例，页面增加「选 HTTPS 后先走握手」（共 78 个）
 
 ## 最近修改 (2026-10-31)
 
@@ -280,7 +289,7 @@ TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支�
 
 ### 中优先级
 
-1. **HTTP/2 与 HTTPS** — 现在是 HTTP/1.1 明文；HTTPS 可展示 TLS 握手，HTTP/2 可展示多路复用
+1. **HTTP/2 多路复用** — 现在 HTTPS 已经能演示 TLS 握手；下一步是在一条连接上并发多个 stream，对比 HTTP/1.1 的队头阻塞
 2. **多种关闭场景** — 同时关闭/服务器主动关闭/半关闭
 3. **更细的单步** — 现在是「一次一轮 RTT」，还可以细到逐 ACK / 逐重传事件
 
@@ -325,7 +334,7 @@ TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支�
 npm install          # 安装依赖
 npm run dev          # 开发服务器 http://localhost:3000
 npm run build        # 生产构建
-npm test             # 运行测试 (76 tests)
+npm test             # 运行测试 (78 tests)
 npm run lint         # ESLint 检查
 npm run test:coverage # 覆盖率（逻辑层门槛）
 npm run verify:ui    # 需要先 npm start：截图验收布局与快重传

@@ -51,6 +51,20 @@ describe('HttpVisualizer', () => {
     expect(screen.getByText(/请求体/)).toBeInTheDocument();
   });
 
+  it('选择 HTTPS 后先走 TLS 握手', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByText('HTTPS'));
+    fireEvent.click(screen.getByText('📨 发送请求'));
+
+    for (let i = 0; i < 4; i += 1) {
+      await act(async () => { jest.advanceTimersByTime(200); });
+    }
+
+    expect(screen.getAllByText(/TLS：ClientHello/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/正在建立 TLS 连接/)).toBeInTheDocument();
+  });
+
   it('选择 404 后响应报文显示 Not Found', async () => {
     renderPage();
 

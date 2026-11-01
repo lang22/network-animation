@@ -3,7 +3,7 @@ import styled, { keyframes } from 'styled-components';
 import { darkTheme } from '@/styles/theme';
 import { useHttpFlow } from '@/hooks/useHttpFlow';
 import Header from '@/components/Layout/Header';
-import { formatMessage, reasonPhrase, DEFAULT_PATH } from '@/services/protocols/httpService';
+import { formatMessage, reasonPhrase, TLS_STEPS, DEFAULT_PATH } from '@/services/protocols/httpService';
 import { HttpMethod, HttpPhase } from '@/types/httpTypes';
 
 // ==================== 布局 ====================
@@ -121,13 +121,15 @@ const PhaseBadge = styled.div<{ $phase: HttpPhase }>`
     $phase === 'done' ? darkTheme.colors.success : darkTheme.colors.primary};
   border: 1px solid currentColor;
 `;
-const Packet = styled.div<{ $kind: 'request' | 'response' }>`
+const Packet = styled.div<{ $kind: 'request' | 'response' | 'tls' }>`
   position: absolute; top: 50%; transform: translate(-50%, -50%);
   padding: 8px 14px; border-radius: 18px; z-index: 20; white-space: nowrap;
   font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
   background: ${({ $kind }) => $kind === 'request'
     ? 'linear-gradient(135deg, #38bdf8, #0284c7)'
-    : 'linear-gradient(135deg, #a78bfa, #7c3aed)'};
+    : $kind === 'tls'
+      ? 'linear-gradient(135deg, #34d399, #059669)'
+      : 'linear-gradient(135deg, #a78bfa, #7c3aed)'};
   color: #fff; box-shadow: 0 0 14px rgba(56,189,248,0.35);
 `;
 
@@ -149,6 +151,9 @@ const LogLine = styled.div`
 `;
 
 const phaseLabel = (phase: HttpPhase) => {
+  if (phase === 'client-hello') return '🔐 TLS：ClientHello';
+  if (phase === 'server-hello') return '🔐 TLS：ServerHello + 证书';
+  if (phase === 'client-finished') return '🔐 TLS：Finished';
   if (phase === 'request') return '📤 发送请求';
   if (phase === 'processing') return '⚙ 服务器处理中';
   if (phase === 'response') return '📥 返回响应';
@@ -162,6 +167,7 @@ const HttpVisualizer: React.FC = () => {
   const [path, setPath] = useState(DEFAULT_PATH);
   const [postBody, setPostBody] = useState('user=admin&pass=123');
   const [status, setStatus] = useState(200);
+  const [secure, setSecure] = useState(false);
   const flow = useHttpFlow(speed);
 
   const requestText = useMemo(
@@ -173,15 +179,26 @@ const HttpVisualizer: React.FC = () => {
     [flow.response],
   );
 
-  const onCanvas = flow.phase === 'request' || flow.phase === 'response';
-  const packetKind = flow.phase === 'response' ? 'response' : 'request';
+  const tlsStep = TLS_STEPS.find(step => step.phase === flow.phase);
+  const onCanvas = Boolean(tlsStep) || flow.phase === 'request' || flow.phase === 'response';
+  const packetKind = tlsStep ? 'tls' : flow.phase === 'response' ? 'response' : 'request';
+  const toLeft = flow.phase === 'response' || tlsStep?.direction === 'to-client';
   // 用 CSS calc 贴着两个端点盒子走，画布宽度变化时也不会飞进盒子里
-  const track = flow.phase === 'response' ? 1 - flow.progress : flow.progress;
+  const track = toLeft ? 1 - flow.progress : flow.progress;
   const packetLeft = `calc(146px + (100% - 292px) * ${track})`;
   const responseLabel = flow.response
     ? flow.response.startLine.replace('HTTP/1.1 ', '')
     : `${status} ${reasonPhrase(status)}`;
-  const packetLabel = flow.phase === 'response' ? responseLabel : `${method} ${path}`;
+  const packetLabel = tlsStep
+    ? tlsStep.label
+    : flow.phase === 'response'
+      ? responseLabel
+      : `${method} ${path}`;
+
+  const handshakeDone = secure && ['request', 'processing', 'response', 'done'].includes(flow.phase);
+  const channelLabel = secure
+    ? (handshakeDone ? 'TLS 1.3 已加密 · keep-alive' : '正在建立 TLS 连接…')
+    : '已建立 TCP 连接 · keep-alive';
 
   return (
     <Page>
@@ -194,11 +211,28 @@ const HttpVisualizer: React.FC = () => {
             <Btn
               $v="accent"
               disabled={flow.isSending}
-              onClick={() => flow.send(method, path, method === 'POST' ? postBody : '', status)}
+              onClick={() => flow.send(method, path, method === 'POST' ? postBody : '', status, secure)}
             >
               📨 发送请求
             </Btn>
             <Btn disabled={flow.isSending} onClick={flow.reset}>重置</Btn>
+
+            <FieldLabel>协议</FieldLabel>
+            <MethodRow>
+              {[
+                { label: 'HTTP', value: false },
+                { label: 'HTTPS', value: true },
+              ].map(item => (
+                <MethodBtn
+                  key={item.label}
+                  $a={secure === item.value}
+                  disabled={flow.isSending}
+                  onClick={() => setSecure(item.value)}
+                >
+                  {item.label}
+                </MethodBtn>
+              ))}
+            </MethodRow>
 
             <FieldLabel>请求方法</FieldLabel>
             <MethodRow>
@@ -276,7 +310,7 @@ const HttpVisualizer: React.FC = () => {
           </Endpoint>
 
           <Channel />
-          <ChannelLabel>已建立 TCP 连接 · 复用 keep-alive</ChannelLabel>
+          <ChannelLabel>{channelLabel}</ChannelLabel>
 
           {onCanvas && (
             <Packet $kind={packetKind} style={{ left: packetLeft }}>
@@ -289,7 +323,7 @@ const HttpVisualizer: React.FC = () => {
         <Panel>
           <PanelH>📄 报文详情</PanelH>
           <PanelC>
-            <SectionTitle>请求</SectionTitle>
+            <SectionTitle>请求{secure ? '（经 TLS 加密）' : ''}</SectionTitle>
             <Code>{requestText}</Code>
             <SectionTitle>响应</SectionTitle>
             <Code>{responseText}</Code>

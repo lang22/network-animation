@@ -45,6 +45,27 @@ describe('useHttpFlow', () => {
     expect(result.current.isSending).toBe(false);
   });
 
+  it('walks through the TLS handshake before an HTTPS request', async () => {
+    const { result } = renderHook(() => useHttpFlow(10));
+
+    act(() => { void result.current.send('GET', '/secure', '', 200, true); });
+    expect(result.current.phase).toBe('client-hello');
+
+    const seen = new Set<string>();
+    for (let i = 0; i < 80; i += 1) {
+      await act(async () => { jest.advanceTimersByTime(20); });
+      seen.add(result.current.phase);
+    }
+
+    expect(seen.has('server-hello')).toBe(true);
+    expect(seen.has('client-finished')).toBe(true);
+    expect(seen.has('request')).toBe(true);
+    expect(result.current.phase).toBe('done');
+    expect(result.current.log.some(entry => entry.text.includes('ClientHello'))).toBe(true);
+    expect(result.current.log.some(entry => entry.text.includes('TLS 握手完成'))).toBe(true);
+    expect(result.current.log.some(entry => entry.text.includes('（已加密）'))).toBe(true);
+  });
+
   it('ignores a second send while one is running', async () => {
     const { result } = renderHook(() => useHttpFlow(10));
 

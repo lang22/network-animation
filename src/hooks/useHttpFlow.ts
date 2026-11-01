@@ -3,12 +3,15 @@ import { HttpLogEntry, HttpMessage, HttpMethod, HttpPhase } from '@/types/httpTy
 import {
   buildRequest,
   buildResponse,
+  TLS_STEPS,
   DEFAULT_PATH,
 } from '@/services/protocols/httpService';
 
 const REQUEST_MS = 1600;
 const PROCESS_MS = 900;
 const RESPONSE_MS = 1600;
+/** TLS 握手每步稍快一点，三步加起来别太久 */
+const TLS_MS = 1200;
 
 /**
  * HTTP 请求/响应动画。
@@ -117,6 +120,7 @@ export function useHttpFlow(speed: number = 1) {
     path: string = DEFAULT_PATH,
     body: string = '',
     status: number = 200,
+    secure: boolean = false,
   ) => {
     if (sendingRef.current) return;
 
@@ -127,12 +131,25 @@ export function useHttpFlow(speed: number = 1) {
     setIsSending(true);
     setLog([]);
     setProgress(0);
+    setRequest(null);
     setResponse(null);
-    setPhase('request');
+
+    // HTTPS：先走一遍 TLS 1.3 握手，之后才开始加密传输 HTTP 报文
+    if (secure) {
+      for (const step of TLS_STEPS) {
+        setPhase(step.phase);
+        setProgress(0);
+        appendLog(`${step.label} · ${step.detail}`);
+        if (!await fly(TLS_MS / speedRef.current, token) || token !== tokenRef.current) return;
+      }
+      appendLog('TLS 握手完成，开始加密传输');
+    }
 
     const req = buildRequest(method, path, body);
     setRequest(req);
-    appendLog(`${method} ${path} → 请求已发出`);
+    setPhase('request');
+    setProgress(0);
+    appendLog(`${method} ${path} → 请求已发出${secure ? '（已加密）' : ''}`);
 
     if (!await fly(REQUEST_MS / speedRef.current, token) || token !== tokenRef.current) return;
 

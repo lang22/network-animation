@@ -9,8 +9,24 @@ export interface HttpMessage {
   body: string;
 }
 
-/** 请求/响应流程所处阶段 */
-export type HttpPhase = 'idle' | 'request' | 'processing' | 'response' | 'done';
+/** 请求/响应流程所处阶段（TLS 三阶段是 HTTPS 才有的前置握手） */
+export type HttpPhase =
+  | 'idle'
+  | 'client-hello'
+  | 'server-hello'
+  | 'client-finished'
+  | 'request'
+  | 'processing'
+  | 'response'
+  | 'done';
+
+/** TLS 1.3 简化握手的每一步 */
+export interface TlsStep {
+  phase: Extract<HttpPhase, 'client-hello' | 'server-hello' | 'client-finished'>;
+  label: string;
+  direction: 'to-server' | 'to-client';
+  detail: string;
+}
 
 export interface HttpLogEntry {
   id: number;
