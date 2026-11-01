@@ -3,7 +3,7 @@ import styled, { keyframes } from 'styled-components';
 import { darkTheme } from '@/styles/theme';
 import { useHttpFlow } from '@/hooks/useHttpFlow';
 import Header from '@/components/Layout/Header';
-import { formatMessage, DEFAULT_PATH } from '@/services/protocols/httpService';
+import { formatMessage, reasonPhrase, DEFAULT_PATH } from '@/services/protocols/httpService';
 import { HttpMethod, HttpPhase } from '@/types/httpTypes';
 
 // ==================== 布局 ====================
@@ -160,6 +160,8 @@ const HttpVisualizer: React.FC = () => {
   const [speed, setSpeed] = useState(1);
   const [method, setMethod] = useState<HttpMethod>('GET');
   const [path, setPath] = useState(DEFAULT_PATH);
+  const [postBody, setPostBody] = useState('user=admin&pass=123');
+  const [status, setStatus] = useState(200);
   const flow = useHttpFlow(speed);
 
   const requestText = useMemo(
@@ -173,10 +175,13 @@ const HttpVisualizer: React.FC = () => {
 
   const onCanvas = flow.phase === 'request' || flow.phase === 'response';
   const packetKind = flow.phase === 'response' ? 'response' : 'request';
-  const packetLeft = flow.phase === 'response'
-    ? 82 - flow.progress * 64
-    : 18 + flow.progress * 64;
-  const packetLabel = flow.phase === 'response' ? '200 OK' : `${method} ${path}`;
+  // 用 CSS calc 贴着两个端点盒子走，画布宽度变化时也不会飞进盒子里
+  const track = flow.phase === 'response' ? 1 - flow.progress : flow.progress;
+  const packetLeft = `calc(146px + (100% - 292px) * ${track})`;
+  const responseLabel = flow.response
+    ? flow.response.startLine.replace('HTTP/1.1 ', '')
+    : `${status} ${reasonPhrase(status)}`;
+  const packetLabel = flow.phase === 'response' ? responseLabel : `${method} ${path}`;
 
   return (
     <Page>
@@ -189,7 +194,7 @@ const HttpVisualizer: React.FC = () => {
             <Btn
               $v="accent"
               disabled={flow.isSending}
-              onClick={() => flow.send(method, path)}
+              onClick={() => flow.send(method, path, method === 'POST' ? postBody : '', status)}
             >
               📨 发送请求
             </Btn>
@@ -215,6 +220,31 @@ const HttpVisualizer: React.FC = () => {
               disabled={flow.isSending}
               onChange={event => setPath(event.target.value.trim() || '/')}
             />
+
+            {method === 'POST' && (
+              <>
+                <FieldLabel>请求体（application/x-www-form-urlencoded）</FieldLabel>
+                <Input
+                  value={postBody}
+                  disabled={flow.isSending}
+                  onChange={event => setPostBody(event.target.value)}
+                />
+              </>
+            )}
+
+            <FieldLabel>响应状态码</FieldLabel>
+            <MethodRow>
+              {[200, 404, 500].map(item => (
+                <MethodBtn
+                  key={item}
+                  $a={status === item}
+                  disabled={flow.isSending}
+                  onClick={() => setStatus(item)}
+                >
+                  {item}
+                </MethodBtn>
+              ))}
+            </MethodRow>
 
             <FieldLabel>速度</FieldLabel>
             <MethodRow>
@@ -249,7 +279,7 @@ const HttpVisualizer: React.FC = () => {
           <ChannelLabel>已建立 TCP 连接 · 复用 keep-alive</ChannelLabel>
 
           {onCanvas && (
-            <Packet $kind={packetKind} style={{ left: `${packetLeft}%` }}>
+            <Packet $kind={packetKind} style={{ left: packetLeft }}>
               {packetLabel}
             </Packet>
           )}

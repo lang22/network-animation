@@ -51,4 +51,20 @@ describe('httpService', () => {
     expect(text).toContain('GET / HTTP/1.1');
     expect(text).not.toContain('\n\n');
   });
+
+  it('uses a default body that matches the status code', () => {
+    const notFound = buildResponse(404);
+    const serverError = buildResponse(500);
+
+    expect(notFound.startLine).toBe('HTTP/1.1 404 Not Found');
+    expect(notFound.body).toContain('404 Not Found');
+    expect(serverError.body).toContain('500 Internal Server Error');
+  });
+
+  it('accepts a custom response body', () => {
+    const response = buildResponse(200, 'ok');
+
+    expect(response.body).toBe('ok');
+    expect(response.headers).toEqual(expect.arrayContaining([['Content-Length', '2']]));
+  });
 });

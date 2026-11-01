@@ -44,11 +44,12 @@
 
 ### HTTP 协议模拟器 (`/protocol/http`)
 
-1. **请求/响应动画** — 请求包从浏览器飞向服务器，服务器处理片刻后响应包飞回
+1. **请求/响应动画** — 请求包从浏览器飞向服务器，服务器处理片刻后响应包飞回；小球用 CSS `calc` 贴着端点盒子飞，窄窗口也不会钻进去
 2. **原始报文展示** — 右侧按 HTTP/1.1 原文展示起始行、头部、正文（响应含 HTML body）
-3. **GET / POST 切换** — POST 自动补 `Content-Type` 与 `Content-Length`（按 UTF-8 字节数）
-4. **路径可编辑** — 默认 `/index.html`，可改成任意路径再发送
-5. **事件日志 + 速度** — 0.5x / 1x / 2x，日志记录请求发出、服务器处理、响应返回、渲染完成
+3. **GET / POST 切换** — POST 可编辑请求体，`Content-Type` 与 `Content-Length`（按 UTF-8 字节数）自动补全
+4. **响应状态码** — 200 / 404 / 500 可切换，报文正文随状态码变化
+5. **路径可编辑** — 默认 `/index.html`，可改成任意路径再发送
+6. **事件日志 + 速度** — 0.5x / 1x / 2x，日志记录请求发出、服务器处理、响应返回、渲染完成
 
 ### 动画系统
 
@@ -148,6 +149,16 @@ src/
 ### 验证
 
 - 真机截图：请求包 `GET /index.html` 飞向服务器 → 响应包 `200 OK` 飞回 → 右侧报文区显示完整请求/响应头与 HTML body，日志记录四个阶段
+
+### HTTP 模块 review（分支 `feature/http-protocol`）
+
+TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支。Review 发现并修掉：
+
+1. **小球位置硬编码成 18%~82%** — 画布变窄时起点会落进「浏览器」盒子里；改成 `calc(146px + (100% - 292px) * progress)`，贴着两端盒子飞
+2. **响应永远 200** — 加 200/404/500 选择器，`buildResponse` 按状态码给默认正文（404/500 有各自的错误页）
+3. **POST 没有请求体** — 加请求体输入框，默认 `user=admin&pass=123`，`Content-Length` 按 UTF-8 字节数算（19）
+4. **重置时飞行动画的 Promise 悬挂** — `fly` 增加取消钩子，重置/卸载时 resolve(false)
+5. **测试** — service 8、hook 5、页面 4（共 76 个）；headless 复测：1100px 窄窗口小球仍在两盒之间、404 报文与 POST 头部正确
 
 ## 最近修改 (2026-10-31)
 
@@ -314,7 +325,7 @@ src/
 npm install          # 安装依赖
 npm run dev          # 开发服务器 http://localhost:3000
 npm run build        # 生产构建
-npm test             # 运行测试 (70 tests)
+npm test             # 运行测试 (76 tests)
 npm run lint         # ESLint 检查
 npm run test:coverage # 覆盖率（逻辑层门槛）
 npm run verify:ui    # 需要先 npm start：截图验收布局与快重传

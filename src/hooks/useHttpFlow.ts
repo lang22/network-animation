@@ -60,13 +60,29 @@ export function useHttpFlow(speed: number = 1) {
     setLog(prev => [...prev.slice(-9), { id: logIdRef.current, text }]);
   }, []);
 
-  /** 让进度从 0 走到 1；被重置/卸载时提前结束 */
+  /** 让进度从 0 走到 1；被重置/卸载时提前结束（不留悬挂的 await） */
   const fly = useCallback((duration: number, token: number) => new Promise<boolean>(resolve => {
     const start = performance.now();
+    let settled = false;
+
+    const finish = (result: boolean) => {
+      if (settled) return;
+      settled = true;
+      timersRef.current.delete(cancel);
+      resolve(result);
+    };
+
+    const cancel = () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      finish(false);
+    };
 
     const tick = () => {
       if (!mountedRef.current || token !== tokenRef.current) {
-        resolve(false);
+        finish(false);
         return;
       }
       const next = Math.min((performance.now() - start) / duration, 1);
@@ -75,10 +91,11 @@ export function useHttpFlow(speed: number = 1) {
         frameRef.current = requestAnimationFrame(tick);
       } else {
         frameRef.current = null;
-        resolve(true);
+        finish(true);
       }
     };
 
+    timersRef.current.add(cancel);
     frameRef.current = requestAnimationFrame(tick);
   }), []);
 
@@ -95,7 +112,12 @@ export function useHttpFlow(speed: number = 1) {
     timersRef.current.add(cancel);
   }), []);
 
-  const send = useCallback(async (method: HttpMethod = 'GET', path: string = DEFAULT_PATH) => {
+  const send = useCallback(async (
+    method: HttpMethod = 'GET',
+    path: string = DEFAULT_PATH,
+    body: string = '',
+    status: number = 200,
+  ) => {
     if (sendingRef.current) return;
 
     sendingRef.current = true;
@@ -108,7 +130,7 @@ export function useHttpFlow(speed: number = 1) {
     setResponse(null);
     setPhase('request');
 
-    const req = buildRequest(method, path);
+    const req = buildRequest(method, path, body);
     setRequest(req);
     appendLog(`${method} ${path} → 请求已发出`);
 
@@ -118,7 +140,7 @@ export function useHttpFlow(speed: number = 1) {
     appendLog('服务器收到请求，正在生成响应');
     if (!await wait(PROCESS_MS / speedRef.current, token) || token !== tokenRef.current) return;
 
-    const res = buildResponse(200);
+    const res = buildResponse(status);
     setResponse(res);
     setPhase('response');
     appendLog(`响应已发出：${res.startLine}`);

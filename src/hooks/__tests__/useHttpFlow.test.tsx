@@ -54,6 +54,27 @@ describe('useHttpFlow', () => {
     expect(result.current.request?.startLine).toBe('GET /a HTTP/1.1');
   });
 
+  it('uses the selected status code for the response', async () => {
+    const { result } = renderHook(() => useHttpFlow(10));
+
+    act(() => { void result.current.send('GET', '/missing', '', 404); });
+    await advance(600);
+
+    expect(result.current.response?.startLine).toBe('HTTP/1.1 404 Not Found');
+    expect(result.current.log.some(entry => entry.text.includes('404'))).toBe(true);
+  });
+
+  it('sends the POST body with a matching content length', async () => {
+    const { result } = renderHook(() => useHttpFlow(10));
+
+    act(() => { void result.current.send('POST', '/login', 'user=admin'); });
+
+    expect(result.current.request?.body).toBe('user=admin');
+    expect(result.current.request?.headers).toEqual(expect.arrayContaining([
+      ['Content-Length', '10'],
+    ]));
+  });
+
   it('reset clears the exchange', async () => {
     const { result } = renderHook(() => useHttpFlow(10));
 

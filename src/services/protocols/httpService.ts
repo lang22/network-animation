@@ -41,9 +41,10 @@ export function buildRequest(
   };
 }
 
-/** 构造一个 HTTP/1.1 响应，默认 200 */
-export function buildResponse(status: number = 200, body: string = DEFAULT_BODY): HttpMessage {
-  const bodyBytes = utf8Length(body);
+/** 构造一个 HTTP/1.1 响应；正文不传时按状态码给默认页 */
+export function buildResponse(status: number = 200, body?: string): HttpMessage {
+  const content = body ?? defaultBodyFor(status);
+  const bodyBytes = utf8Length(content);
 
   return {
     startLine: `HTTP/1.1 ${status} ${reasonPhrase(status)}`,
@@ -54,8 +55,19 @@ export function buildResponse(status: number = 200, body: string = DEFAULT_BODY)
       ['Content-Length', String(bodyBytes)],
       ['Connection', 'keep-alive'],
     ],
-    body,
+    body: content,
   };
+}
+
+/** 各状态码的示例正文 */
+export function defaultBodyFor(status: number): string {
+  if (status === 404) {
+    return '<!DOCTYPE html>\n<html>\n  <head><title>404</title></head>\n  <body><h1>404 Not Found</h1><p>请求的资源不存在</p></body>\n</html>';
+  }
+  if (status === 500) {
+    return '<!DOCTYPE html>\n<html>\n  <head><title>500</title></head>\n  <body><h1>500 Internal Server Error</h1><p>服务器处理请求时出错</p></body>\n</html>';
+  }
+  return DEFAULT_BODY;
 }
 
 /** 状态码对应的原因短语 */
