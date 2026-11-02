@@ -54,6 +54,20 @@
 8. **响应状态码** — 200 / 404 / 500 可切换，报文正文随状态码变化
 9. **事件日志 + 速度** — 0.5x / 1x / 2x，日志记录握手、请求发出、服务器处理、响应返回
 
+### DNS 协议模拟器 (`/protocol/dns`)
+
+1. **递归解析全过程** — 浏览器 → 本地 DNS → 根 → 顶级域 → 权威服务器，共 8 条问答消息，每步在画布上飞一次
+2. **节点可视化** — 五个节点按角色着色（客户端绿 / 基础设施紫 / 服务器蓝），消息经过的节点高亮
+3. **结果与缓存** — 解析完成后展示 A/AAAA 记录、TTL、权威服务器，并给出「本机缓存」提示
+4. **可调参数** — 域名、记录类型（A/AAAA）、速度
+
+### DHCP 协议模拟器 (`/protocol/dhcp`)
+
+1. **DORA 四步** — Discover（广播）→ Offer → Request（广播）→ ACK，画布上按方向飞行
+2. **状态机** — INIT → SELECTING → REQUESTING → BOUND，按当前步骤高亮
+3. **租约信息** — 完成后展示 IP / 子网掩码 / 网关 / DNS / 租期，并提示续租与到期行为
+4. **速度调节** — 0.5x / 1x / 2x
+
 ### 动画系统
 
 - **出现动画** - 数据包弹出（scale 0→1 + opacity），带弹性回弹
@@ -139,6 +153,20 @@ src/
   70    │  传输/挥手     │  DATA_ACK / FIN2
   80    │  挥手          │  ACK2
 ```
+
+## 最近修改 (2026-11-02)
+
+### DNS / DHCP 模拟器
+
+1. **共用步骤引擎** — 新增 `useStepFlow` + `FlowCanvas`：一组「节点 + 消息」脚本按顺序播放，消息在两个节点之间飞，Dns/Dhcp 两个页面共用同一套动画与样式
+2. **DNS 递归解析** — 8 步问答（浏览器→本地 DNS→根→顶级域→权威→回传），支持 A/AAAA 与自定义域名，完成后展示结果与缓存
+3. **DHCP DORA** — Discover / Offer / Request / ACK 四步，配 INIT→SELECTING→REQUESTING→BOUND 状态机与租约表
+4. **路由** — `/protocol/dns`、`/protocol/dhcp`；首页两张卡片从「通用详情页」换成了真实模拟器
+5. **测试** — 服务 7 个、hook 3 个、页面 5 个（共 104 个）
+
+### 验证
+
+- headless 复测：DNS 第 3/8 步时消息在根服务器与本地 DNS 之间飞行、完成后显示 `93.184.216.34` 与本机缓存；DHCP 四步走完后状态机全部 ✓、租约表展示 `192.168.1.100`（IP/掩码/网关/DNS/24 小时），无页面错误
 
 ## 最近修改 (2026-11-01)
 
@@ -352,6 +380,11 @@ TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支�
 | HTTP 状态机 | `src/hooks/useHttpFlow.ts` |
 | HTTP 报文构造 | `src/services/protocols/httpService.ts` |
 | HTTP 测试 | `src/services/protocols/__tests__/httpService.test.ts` |
+| DNS 页面 | `src/components/Dns/DnsVisualizer.tsx` |
+| DHCP 页面 | `src/components/Dhcp/DhcpVisualizer.tsx` |
+| DNS 脚本 | `src/services/protocols/dnsService.ts` |
+| DHCP 脚本 | `src/services/protocols/dhcpService.ts` |
+| 步骤动画引擎 | `src/hooks/useStepFlow.ts` + `src/components/Flow/FlowCanvas.tsx` |
 
 ## 快速启动
 
@@ -359,7 +392,7 @@ TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支�
 npm install          # 安装依赖
 npm run dev          # 开发服务器 http://localhost:3000
 npm run build        # 生产构建
-npm test             # 运行测试 (88 tests)
+npm test             # 运行测试 (104 tests)
 npm run lint         # ESLint 检查
 npm run test:coverage # 覆盖率（逻辑层门槛）
 npm run verify:ui    # 需要先 npm start：截图验收布局与快重传

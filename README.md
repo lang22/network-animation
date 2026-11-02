@@ -15,6 +15,8 @@
 - **HTTPS / TLS 1.3 握手** - 切到 HTTPS 后先演示 ClientHello → ServerHello + 证书 → Finished 三步握手
 - **HTTP/2 多路复用** - 三个资源并行在三条流上加载，对比 HTTP/1.1 的串行等待
 - **缓存与自定义头** - ETag / Cache-Control、If-None-Match → 304，可自定义响应头
+- **DNS 递归解析** - 浏览器 → 本地 DNS → 根 → 顶级域 → 权威服务器，8 步问答与缓存
+- **DHCP 租约分配** - Discover / Offer / Request / ACK 四步（DORA）与状态机、租约表
 - **数据传输模拟** - 演示数据包发送与确认机制
 - **深色科技风 UI** - 现代化的霓虹风格界面
 - **协议栈可视化** - 展示各协议层的激活状态
@@ -116,6 +118,8 @@ src/
 - `/protocol/tcp` — 握手 / 数据传输 / 挥手
 - `/protocol/congestion` — 拥塞控制与丢包重传
 - `/protocol/http` — HTTP 请求 / 响应
+- `/protocol/dns` — DNS 递归解析
+- `/protocol/dhcp` — DHCP 租约分配
 
 1. 打开应用后，点击 **"三次握手"** 按钮开始 TCP 连接建立动画
 2. 握手完成后，点击 **"发送数据"** 进行数据传输演示
