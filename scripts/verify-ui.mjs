@@ -167,15 +167,44 @@ try {
   // ── 场景 5：HTTP 页面能发送请求并渲染报文 ──
   await page.goto(new URL('/protocol/http', url).href, { waitUntil: 'load' });
   await sleep(800);
+  // 用 HTTP/2 + 2x：三个流并发，几秒内就能跑完
+  await page.getByRole('button', { name: 'HTTP/2' }).click();
+  await page.getByRole('button', { name: '2x' }).click();
   await page.getByRole('button', { name: '📨 发送请求' }).click();
-  await sleep(900);
+  await sleep(700);
   check((await text(page)).includes('GET /index.html HTTP/1.1'), 'HTTP 页面没有显示请求报文');
 
-  await sleep(3600);
+  await sleep(2600);
   const httpDone = await text(page);
   check(httpDone.includes('HTTP/1.1 200 OK'), 'HTTP 页面没有显示响应报文');
   check(httpDone.includes('✅ 完成'), 'HTTP 请求没有走到完成状态');
   await page.screenshot({ path: path.join(outDir, 'http.png') });
+
+  // ── 场景 6：DNS 递归解析 ──
+  await page.goto(new URL('/protocol/dns', url).href, { waitUntil: 'load' });
+  await sleep(800);
+  await page.getByRole('button', { name: '2x' }).click();
+  await page.getByRole('button', { name: '🔍 开始解析' }).click();
+  await sleep(1800);
+  check((await text(page)).includes('解析中'), 'DNS 页面没有进入解析状态');
+  await sleep(3200);
+  const dnsDone = await text(page);
+  check(dnsDone.includes('93.184.216.34'), 'DNS 解析没有给出答案');
+  check(dnsDone.includes('本机缓存'), 'DNS 页面没有展示缓存');
+  await page.screenshot({ path: path.join(outDir, 'dns.png') });
+
+  // ── 场景 7：DHCP DORA ──
+  await page.goto(new URL('/protocol/dhcp', url).href, { waitUntil: 'load' });
+  await sleep(800);
+  await page.getByRole('button', { name: '2x' }).click();
+  await page.getByRole('button', { name: '📡 开始获取地址' }).click();
+  await sleep(1400);
+  check((await text(page)).includes('进行中'), 'DHCP 页面没有进入 DORA 流程');
+  await sleep(2600);
+  const dhcpDone = await text(page);
+  check(dhcpDone.includes('192.168.1.100'), 'DHCP 没有分配地址');
+  check(dhcpDone.includes('BOUND'), 'DHCP 状态机没有走到 BOUND');
+  await page.screenshot({ path: path.join(outDir, 'dhcp.png') });
 } finally {
   await browser.close();
 }
