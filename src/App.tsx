@@ -8,6 +8,7 @@ import CongestionVisualizer from '@/components/CongestionControl/CongestionVisua
 import HttpVisualizer from '@/components/Http/HttpVisualizer';
 import DnsVisualizer from '@/components/Dns/DnsVisualizer';
 import DhcpVisualizer from '@/components/Dhcp/DhcpVisualizer';
+import ArpVisualizer from '@/components/Arp/ArpVisualizer';
 
 const App: React.FC = () => {
   return (
@@ -20,6 +21,7 @@ const App: React.FC = () => {
           <Route path="/protocol/http" element={<HttpVisualizer />} />
           <Route path="/protocol/dns" element={<DnsVisualizer />} />
           <Route path="/protocol/dhcp" element={<DhcpVisualizer />} />
+          <Route path="/protocol/arp" element={<ArpVisualizer />} />
           <Route path="/protocol/:id" element={<ProtocolDetail />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

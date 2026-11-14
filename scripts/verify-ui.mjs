@@ -217,6 +217,21 @@ try {
   await page.getByRole('button', { name: /释放/ }).click();
   await sleep(1400);
   check((await text(page)).includes('已释放，回到 INIT'), 'DHCP 释放没有完成');
+
+  // ── 场景 8：ARP 广播解析 ──
+  await page.goto(new URL('/protocol/arp', url).href, { waitUntil: 'load' });
+  await sleep(800);
+  await page.getByRole('button', { name: '2x' }).click();
+  await page.getByRole('button', { name: '📣 发送 ARP 请求' }).click();
+  await sleep(260);
+  const broadcastPills = await page.evaluate(() => [...document.querySelectorAll('div')]
+    .filter(node => node.textContent?.trim() === 'ARP Request（广播）').length);
+  check(broadcastPills === 2, `ARP 广播没有同时发给两台主机（${broadcastPills}）`);
+  await sleep(2400);
+  const arpDone = await text(page);
+  check(arpDone.includes('地址已解析'), 'ARP 没有完成解析');
+  check(arpDone.includes('aa:bb:cc:00:00:02'), 'ARP 缓存没有写入 MAC');
+  await page.screenshot({ path: path.join(outDir, 'arp.png') });
 } finally {
   await browser.close();
 }

@@ -70,6 +70,13 @@
 4. **续租与释放** — 租约生效后可续租（T1 单播 Request + ACK）或主动释放（Release，回到 INIT）
 5. **速度调节** — 0.5x / 1x / 2x
 
+### ARP 协议模拟器 (`/protocol/arp`)
+
+1. **广播询问** — 请求包同时飞向 B、C 两台主机，目标 MAC 为 `FF:FF:FF:FF:FF:FF`
+2. **单播应答** — 只有被问的主机回复自己的 MAC，其余主机丢弃
+3. **ARP 缓存** — 解析完成后展示 A 的 ARP 表（IP ↔ MAC、TTL 60s）与局域网主机表
+4. **可切换目标** — 可选解析主机 B（192.168.1.20）或 C（192.168.1.30）
+
 ### 动画系统
 
 - **出现动画** - 数据包弹出（scale 0→1 + opacity），带弹性回弹
@@ -158,6 +165,14 @@ src/
 
 ## 最近修改 (2026-11-14)
 
+### ARP 协议模拟器
+
+1. **广播支持** — `FlowStep.to` 支持数组，`FlowCanvas` 对同一进度渲染多个包；ARP 广播同时飞向 B、C
+2. **ARP 流程** — 广播 Request（FF:FF:FF:FF:FF:FF）→ 目标主机单播 Reply → A 写入缓存后按 MAC 发送数据帧
+3. **页面** — `/protocol/arp`，可选解析主机 B/C，展示 A 的 ARP 表（IP ↔ MAC、TTL 60s）与局域网主机表
+4. **动画修正** — 消息到达后立即撤掉包，避免停在目标节点上盖住标签
+5. **测试** — ARP 服务 4 个、页面 3 个（共 116 个）；`verify:ui` 增加 ARP 广播场景
+
 ### DNS 缓存命中 + DHCP 续租/释放
 
 1. **DNS 二次查询** — 解析完成后「🔁 再次解析（命中缓存）」可用，只走 `buildCachedLookup` 的两跳，状态栏显示「缓存命中（两跳返回）」
@@ -168,7 +183,7 @@ src/
 
 ### 验证
 
-- headless（verify:ui）：DNS 递归 → 再次解析命中缓存；DHCP DORA → 续租成功 → 释放回到 INIT，全流程通过
+- headless（verify:ui）：DNS 递归 → 再次解析命中缓存；DHCP DORA → 续租成功 → 释放回到 INIT；ARP 广播同时出现两个请求包并写入缓存，全流程通过
 
 ## 最近修改 (2026-11-02)
 
@@ -398,6 +413,8 @@ TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支�
 | HTTP 测试 | `src/services/protocols/__tests__/httpService.test.ts` |
 | DNS 页面 | `src/components/Dns/DnsVisualizer.tsx` |
 | DHCP 页面 | `src/components/Dhcp/DhcpVisualizer.tsx` |
+| ARP 页面 | `src/components/Arp/ArpVisualizer.tsx` |
+| ARP 脚本 | `src/services/protocols/arpService.ts` |
 | DNS 脚本 | `src/services/protocols/dnsService.ts` |
 | DHCP 脚本 | `src/services/protocols/dhcpService.ts` |
 | 步骤动画引擎 | `src/hooks/useStepFlow.ts` + `src/components/Flow/FlowCanvas.tsx` |
@@ -408,7 +425,7 @@ TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支�
 npm install          # 安装依赖
 npm run dev          # 开发服务器 http://localhost:3000
 npm run build        # 生产构建
-npm test             # 运行测试 (109 tests)
+npm test             # 运行测试 (116 tests)
 npm run lint         # ESLint 检查
 npm run test:coverage # 覆盖率（逻辑层门槛）
 npm run verify:ui    # 需要先 npm start：截图验收布局与快重传

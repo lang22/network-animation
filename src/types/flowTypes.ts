@@ -13,7 +13,8 @@ export interface FlowNode {
 export interface FlowStep {
   id: string;
   from: string;
-  to: string;
+  /** 广播消息可以同时发给多个节点 */
+  to: string | string[];
   /** 画布上飞行的包标题 */
   label: string;
   /** 右侧日志里的详细说明 */

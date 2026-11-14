@@ -104,6 +104,8 @@ export function useStepFlow(speed: number = 1) {
       if (!await fly(step, STEP_MS / speedRef.current, token) || token !== tokenRef.current) return;
       if (!mountedRef.current) return;
 
+      // 到达后立刻撤掉包，避免在节点上停留到下一步
+      setPacket(null);
       appendLog(`${step.label} · ${step.detail}`);
       if (!await wait(GAP_MS / speedRef.current, token) || token !== tokenRef.current) return;
     }

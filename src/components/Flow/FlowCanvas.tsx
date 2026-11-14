@@ -27,7 +27,7 @@ const NodeBox = styled.div<{ $tone: FlowNode['tone']; $active: boolean }>`
 const NodeLabel = styled.div` font-size: 13px; font-weight: 700; line-height: 1.3; `;
 const NodeDetail = styled.div`
   margin-top: 6px; font-size: 10px; opacity: 0.6; line-height: 1.5;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', monospace; white-space: pre-line;
 `;
 
 const pulse = keyframes`
@@ -65,14 +65,18 @@ interface FlowCanvasProps {
 
 const FlowCanvas: React.FC<FlowCanvasProps> = ({ nodes, packet }) => {
   const from = packet ? nodes.find(node => node.id === packet.step.from) : undefined;
-  const to = packet ? nodes.find(node => node.id === packet.step.to) : undefined;
+  const targetIds = packet
+    ? (Array.isArray(packet.step.to) ? packet.step.to : [packet.step.to])
+    : [];
+  const targets = targetIds
+    .map(id => nodes.find(node => node.id === id))
+    .filter((node): node is FlowNode => Boolean(node));
 
   const activeIds = new Set<string>();
   if (from) activeIds.add(from.id);
-  if (to) activeIds.add(to.id);
+  targets.forEach(target => activeIds.add(target.id));
 
-  const packetX = from && to ? from.x + (to.x - from.x) * (packet?.progress ?? 0) : 0;
-  const packetY = from && to ? from.y + (to.y - from.y) * (packet?.progress ?? 0) : 0;
+  const progress = packet?.progress ?? 0;
 
   return (
     <CanvasPanel data-testid="flow-canvas">
@@ -88,9 +92,15 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({ nodes, packet }) => {
         </NodeBox>
       ))}
 
-      {from && to && packet && (
-        <PacketPill $x={packetX} $y={packetY}>{packet.step.label}</PacketPill>
-      )}
+      {from && packet && targets.map(target => (
+        <PacketPill
+          key={target.id}
+          $x={from.x + (target.x - from.x) * progress}
+          $y={from.y + (target.y - from.y) * progress}
+        >
+          {packet.step.label}
+        </PacketPill>
+      ))}
 
       <Legend>
         <span className="client">客户端 / 主机</span>

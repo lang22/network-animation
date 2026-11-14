@@ -197,6 +197,14 @@ const protocols = [
         icon: '⚙️',
         available: false,
         path: '/protocol/dhcp'
+    },
+    {
+        id: 'arp',
+        name: 'ARP 协议',
+        description: '地址解析协议，在局域网内把 IP 地址解析成 MAC 地址',
+        icon: '📣',
+        available: false,
+        path: '/protocol/arp'
     }
 ];
 
