@@ -1,4 +1,4 @@
-import { DNS_NODES, buildDnsLookup } from '../dnsService';
+import { DNS_NODES, buildCachedLookup, buildDnsLookup } from '../dnsService';
 
 describe('dnsService', () => {
   it('builds the recursive lookup from client to answer', () => {
@@ -34,5 +34,17 @@ describe('dnsService', () => {
     const { steps } = buildDnsLookup('api.example.org');
 
     expect(steps[0].label).toContain('api.example.org');
+  });
+
+  it('builds a two-hop cached lookup', () => {
+    const { answer } = buildDnsLookup('example.com', 'A');
+    const steps = buildCachedLookup(answer);
+
+    expect(steps).toHaveLength(2);
+    expect(steps[0].from).toBe('client');
+    expect(steps[0].to).toBe('resolver');
+    expect(steps[1].to).toBe('client');
+    expect(steps[0].detail).toContain('缓存命中');
+    expect(steps[1].label).toContain(answer.value);
   });
 });

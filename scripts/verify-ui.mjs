@@ -180,7 +180,7 @@ try {
   check(httpDone.includes('✅ 完成'), 'HTTP 请求没有走到完成状态');
   await page.screenshot({ path: path.join(outDir, 'http.png') });
 
-  // ── 场景 6：DNS 递归解析 ──
+  // ── 场景 6：DNS 递归解析 + 缓存命中 ──
   await page.goto(new URL('/protocol/dns', url).href, { waitUntil: 'load' });
   await sleep(800);
   await page.getByRole('button', { name: '2x' }).click();
@@ -193,7 +193,11 @@ try {
   check(dnsDone.includes('本机缓存'), 'DNS 页面没有展示缓存');
   await page.screenshot({ path: path.join(outDir, 'dns.png') });
 
-  // ── 场景 7：DHCP DORA ──
+  await page.getByRole('button', { name: /再次解析/ }).click();
+  await sleep(1800);
+  check((await text(page)).includes('缓存命中（两跳返回）'), 'DNS 缓存命中流程没有跑通');
+
+  // ── 场景 7：DHCP DORA + 续租 + 释放 ──
   await page.goto(new URL('/protocol/dhcp', url).href, { waitUntil: 'load' });
   await sleep(800);
   await page.getByRole('button', { name: '2x' }).click();
@@ -205,6 +209,14 @@ try {
   check(dhcpDone.includes('192.168.1.100'), 'DHCP 没有分配地址');
   check(dhcpDone.includes('BOUND'), 'DHCP 状态机没有走到 BOUND');
   await page.screenshot({ path: path.join(outDir, 'dhcp.png') });
+
+  await page.getByRole('button', { name: /续租/ }).click();
+  await sleep(1800);
+  check((await text(page)).includes('续租成功（BOUND）'), 'DHCP 续租没有完成');
+
+  await page.getByRole('button', { name: /释放/ }).click();
+  await sleep(1400);
+  check((await text(page)).includes('已释放，回到 INIT'), 'DHCP 释放没有完成');
 } finally {
   await browser.close();
 }

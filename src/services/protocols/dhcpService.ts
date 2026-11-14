@@ -65,3 +65,38 @@ export function dhcpStateAt(stepIndex: number): string {
   if (stepIndex < 0) return DHCP_STATES[0];
   return DHCP_STATES[Math.min(stepIndex, DHCP_STATES.length - 1)];
 }
+
+/** 租期过半（T1）后的续租：单播 Request + ACK */
+export function buildDhcpRenew(): FlowStep[] {
+  const lease = DHCP_LEASE;
+
+  return [
+    {
+      id: 'renew-request',
+      from: 'client',
+      to: 'server',
+      label: 'DHCP Request（续租）',
+      detail: `租期过半（T1 = ${lease.leaseHours / 2} 小时），客户端单播向原服务器请求续租`,
+    },
+    {
+      id: 'renew-ack',
+      from: 'server',
+      to: 'client',
+      label: 'DHCP ACK（续租）',
+      detail: `续租成功，租期重新计时 ${lease.leaseHours} 小时，仍保持 BOUND`,
+    },
+  ];
+}
+
+/** 主动释放：客户端单播 Release，服务器不回复 */
+export function buildDhcpRelease(): FlowStep[] {
+  return [
+    {
+      id: 'release',
+      from: 'client',
+      to: 'server',
+      label: 'DHCP Release',
+      detail: `客户端主动释放 ${DHCP_LEASE.ip}，服务器把地址标记为可用，客户端回到 INIT`,
+    },
+  ];
+}

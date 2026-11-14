@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Header from '@/components/Layout/Header';
 import FlowCanvas from '@/components/Flow/FlowCanvas';
 import { useStepFlow } from '@/hooks/useStepFlow';
-import { DNS_NODES, DnsAnswer, DnsRecordType, buildDnsLookup } from '@/services/protocols/dnsService';
+import { DNS_NODES, DnsAnswer, DnsRecordType, buildCachedLookup, buildDnsLookup } from '@/services/protocols/dnsService';
 import {
   Page, Main, Panel, PanelH, PanelC, Btn, FieldLabel, Input, Row, ChoiceBtn,
   StatusBox, SectionTitle, ResultRow, LogLine, Placeholder,
@@ -13,22 +13,33 @@ const DnsVisualizer: React.FC = () => {
   const [domain, setDomain] = useState('example.com');
   const [recordType, setRecordType] = useState<DnsRecordType>('A');
   const [answer, setAnswer] = useState<DnsAnswer | null>(null);
+  const [cacheHit, setCacheHit] = useState(false);
   const flow = useStepFlow(speed);
 
   const start = () => {
     const lookup = buildDnsLookup(domain, recordType);
     setAnswer(lookup.answer);
+    setCacheHit(false);
     void flow.play(lookup.steps);
+  };
+
+  /** 第二次查询：本地 DNS 缓存命中，只走两跳 */
+  const replayFromCache = () => {
+    if (!answer) return;
+    setCacheHit(true);
+    void flow.play(buildCachedLookup(answer));
   };
 
   const reset = () => {
     flow.reset();
     setAnswer(null);
+    setCacheHit(false);
   };
 
   const done = flow.status === 'done';
+  const canReplay = done && Boolean(answer) && !cacheHit;
   const statusText = done
-    ? '✅ 解析完成'
+    ? (cacheHit ? '✅ 缓存命中（两跳返回）' : '✅ 解析完成')
     : flow.status === 'playing'
       ? (flow.packet ? `解析中：${flow.packet.step.label}` : '解析中…')
       : '待解析';
@@ -42,6 +53,9 @@ const DnsVisualizer: React.FC = () => {
           <PanelC>
             <Btn $v="accent" disabled={flow.status === 'playing'} onClick={start}>
               🔍 开始解析
+            </Btn>
+            <Btn disabled={!canReplay || flow.status === 'playing'} onClick={replayFromCache}>
+              🔁 再次解析（命中缓存）
             </Btn>
             <Btn disabled={flow.status === 'playing'} onClick={reset}>重置</Btn>
 
@@ -79,7 +93,7 @@ const DnsVisualizer: React.FC = () => {
               {statusText}
             </StatusBox>
             {flow.status === 'playing' && (
-              <Placeholder>第 {flow.currentIndex + 1} / 8 步</Placeholder>
+              <Placeholder>第 {flow.currentIndex + 1} / {flow.total} 步</Placeholder>
             )}
           </PanelC>
         </Panel>
@@ -98,7 +112,7 @@ const DnsVisualizer: React.FC = () => {
                 <ResultRow>TTL <span>{answer.ttl}s</span></ResultRow>
                 <ResultRow>权威 <span>{answer.authoritative}</span></ResultRow>
 
-                <SectionTitle>本机缓存</SectionTitle>
+                <SectionTitle>本机缓存{cacheHit ? '（本次直接命中）' : ''}</SectionTitle>
                 <ResultRow>{answer.domain} <span>{answer.value}</span></ResultRow>
                 <Placeholder>按 TTL {answer.ttl}s 缓存，再次访问直接命中，不再走递归</Placeholder>
               </>

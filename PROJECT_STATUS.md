@@ -59,14 +59,16 @@
 1. **递归解析全过程** — 浏览器 → 本地 DNS → 根 → 顶级域 → 权威服务器，共 8 条问答消息，每步在画布上飞一次
 2. **节点可视化** — 五个节点按角色着色（客户端绿 / 基础设施紫 / 服务器蓝），消息经过的节点高亮
 3. **结果与缓存** — 解析完成后展示 A/AAAA 记录、TTL、权威服务器，并给出「本机缓存」提示
-4. **可调参数** — 域名、记录类型（A/AAAA）、速度
+4. **缓存命中演示** — 解析完成后再点「再次解析」，只走客户端 ↔ 本地 DNS 两跳，对比递归的 8 步
+5. **可调参数** — 域名、记录类型（A/AAAA）、速度
 
 ### DHCP 协议模拟器 (`/protocol/dhcp`)
 
 1. **DORA 四步** — Discover（广播）→ Offer → Request（广播）→ ACK，画布上按方向飞行
 2. **状态机** — INIT → SELECTING → REQUESTING → BOUND，按当前步骤高亮
-3. **租约信息** — 完成后展示 IP / 子网掩码 / 网关 / DNS / 租期，并提示续租与到期行为
-4. **速度调节** — 0.5x / 1x / 2x
+3. **租约信息** — 完成后展示 IP / 子网掩码 / 网关 / DNS / 租期
+4. **续租与释放** — 租约生效后可续租（T1 单播 Request + ACK）或主动释放（Release，回到 INIT）
+5. **速度调节** — 0.5x / 1x / 2x
 
 ### 动画系统
 
@@ -153,6 +155,20 @@ src/
   70    │  传输/挥手     │  DATA_ACK / FIN2
   80    │  挥手          │  ACK2
 ```
+
+## 最近修改 (2026-11-14)
+
+### DNS 缓存命中 + DHCP 续租/释放
+
+1. **DNS 二次查询** — 解析完成后「🔁 再次解析（命中缓存）」可用，只走 `buildCachedLookup` 的两跳，状态栏显示「缓存命中（两跳返回）」
+2. **DHCP 续租** — 租约生效后「♻️ 续租」执行 T1（12 小时）之后的单播 Request + ACK，状态保持 BOUND
+3. **DHCP 释放** — 「🗑 释放」发一条 DHCP Release（服务器不回包），租约表隐藏，状态回到 INIT
+4. **步骤计数动态化** — `useStepFlow` 暴露 `total`，页面显示「第 X / N 步」不再写死 8 或 4
+5. **测试** — DNS/DHCP 服务与页面新增缓存、续租、释放用例，共 109 个；`verify:ui` 的 DNS/DHCP 场景补上这些断言
+
+### 验证
+
+- headless（verify:ui）：DNS 递归 → 再次解析命中缓存；DHCP DORA → 续租成功 → 释放回到 INIT，全流程通过
 
 ## 最近修改 (2026-11-02)
 
@@ -392,7 +408,7 @@ TCP 模块告一段落，HTTP 后续开发切到 `feature/http-protocol` 分支�
 npm install          # 安装依赖
 npm run dev          # 开发服务器 http://localhost:3000
 npm run build        # 生产构建
-npm test             # 运行测试 (104 tests)
+npm test             # 运行测试 (109 tests)
 npm run lint         # ESLint 检查
 npm run test:coverage # 覆盖率（逻辑层门槛）
 npm run verify:ui    # 需要先 npm start：截图验收布局与快重传

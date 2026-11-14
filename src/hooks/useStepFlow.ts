@@ -13,6 +13,7 @@ export function useStepFlow(speed: number = 1) {
   const [status, setStatus] = useState<FlowStatus>('idle');
   const [packet, setPacket] = useState<FlowPacket | null>(null);
   const [currentIndex, setCurrentIndex] = useState(-1);
+  const [total, setTotal] = useState(0);
   const [log, setLog] = useState<FlowLogEntry[]>([]);
 
   const speedRef = useRef(speed);
@@ -93,6 +94,7 @@ export function useStepFlow(speed: number = 1) {
     setStatus('playing');
     setLog([]);
     setCurrentIndex(-1);
+    setTotal(steps.length);
     setPacket(null);
 
     for (let index = 0; index < steps.length; index += 1) {
@@ -115,8 +117,9 @@ export function useStepFlow(speed: number = 1) {
     stop();
     setStatus('idle');
     setCurrentIndex(-1);
+    setTotal(0);
     setLog([]);
   }, [stop]);
 
-  return { status, packet, currentIndex, log, play, reset };
+  return { status, packet, currentIndex, total, log, play, reset };
 }

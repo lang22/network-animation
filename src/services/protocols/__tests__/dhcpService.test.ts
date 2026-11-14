@@ -1,5 +1,6 @@
 import {
-  DHCP_LEASE, DHCP_NODES, DHCP_STATES, buildDhcpExchange, dhcpStateAt,
+  DHCP_LEASE, DHCP_NODES, DHCP_STATES, buildDhcpExchange, buildDhcpRelease,
+  buildDhcpRenew, dhcpStateAt,
 } from '../dhcpService';
 
 describe('dhcpService', () => {
@@ -36,5 +37,24 @@ describe('dhcpService', () => {
       expect(ids.has(step.from)).toBe(true);
       expect(ids.has(step.to)).toBe(true);
     }
+  });
+
+  it('builds a two-step renew after half of the lease', () => {
+    const steps = buildDhcpRenew();
+
+    expect(steps).toHaveLength(2);
+    expect(steps[0].from).toBe('client');
+    expect(steps[0].label).toContain('续租');
+    expect(steps[0].detail).toContain('T1');
+    expect(steps[1].from).toBe('server');
+  });
+
+  it('builds a single release message', () => {
+    const steps = buildDhcpRelease();
+
+    expect(steps).toHaveLength(1);
+    expect(steps[0].from).toBe('client');
+    expect(steps[0].to).toBe('server');
+    expect(steps[0].detail).toContain(DHCP_LEASE.ip);
   });
 });

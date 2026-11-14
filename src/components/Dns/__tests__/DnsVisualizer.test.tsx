@@ -54,4 +54,26 @@ describe('DnsVisualizer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'AAAA' }));
     expect(screen.getByRole('button', { name: 'AAAA' })).toBeInTheDocument();
   });
+
+  it('解析完成后可以再次解析并命中缓存', async () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '2x' }));
+    fireEvent.click(screen.getByText('🔍 开始解析'));
+    for (let i = 0; i < 200; i += 1) {
+      await act(async () => { jest.advanceTimersByTime(50); });
+      if (screen.queryAllByText('93.184.216.34').length > 0) break;
+    }
+
+    const cacheButton = screen.getByRole('button', { name: /再次解析/ });
+    expect(cacheButton).not.toBeDisabled();
+    fireEvent.click(cacheButton);
+
+    for (let i = 0; i < 80; i += 1) {
+      await act(async () => { jest.advanceTimersByTime(50); });
+      if (screen.queryAllByText(/缓存命中（两跳返回）/).length > 0) break;
+    }
+
+    expect(screen.getAllByText(/缓存命中（两跳返回）/).length).toBeGreaterThan(0);
+  });
 });

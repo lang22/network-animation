@@ -99,3 +99,23 @@ export function buildDnsLookup(domain: string, type: DnsRecordType = 'A'): {
 
   return { steps, answer };
 }
+
+/** 缓存命中：只走「客户端 ↔ 本地 DNS」两跳，不再递归 */
+export function buildCachedLookup(answer: DnsAnswer): FlowStep[] {
+  return [
+    {
+      id: 'cache-query',
+      from: 'client',
+      to: 'resolver',
+      label: `查询 ${answer.domain} ${answer.type}`,
+      detail: `本地 DNS 缓存命中（TTL ${answer.ttl}s），不需要再问根 / TLD / 权威`,
+    },
+    {
+      id: 'cache-answer',
+      from: 'resolver',
+      to: 'client',
+      label: `返回 ${answer.value}`,
+      detail: '缓存未过期，两跳就拿到答案，省掉整个递归过程',
+    },
+  ];
+}
